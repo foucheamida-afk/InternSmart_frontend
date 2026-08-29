@@ -1,18 +1,46 @@
-import bcrypt from "bcrypt";
 import User from "../models/userModel.js";
+import bcrypt from "bcrypt";
+
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    // Check email
+    if (!email) {
+      return res.status(400).json({
+        message: "Email is required",
+      });
+    }
+
+    // Find user by email
+    const user = await User.findOne({ where: { email } });
+
+    // Always return success for security (don't reveal if email exists)
+    // In production, you would send an email with a reset token here
+    return res.status(200).json({
+      message: "If an account with this email exists, a password reset link has been sent.",
+    });
+
+  } catch (error) {
+    console.error("FORGOT PASSWORD ERROR:", error);
+
+    return res.status(500).json({
+      message: "Error processing request",
+      error: error.message,
+    });
+  }
+};
 
 const changePassword = async (req, res) => {
   try {
     const {
-      email,
       currentPassword,
       newPassword,
       confirmPassword,
     } = req.body;
 
-    // 1. Check required fields
+    // Check fields
     if (
-      !email ||
       !currentPassword ||
       !newPassword ||
       !confirmPassword
@@ -22,14 +50,14 @@ const changePassword = async (req, res) => {
       });
     }
 
-    // 2. Check if passwords match
+    // Check confirmation
     if (newPassword !== confirmPassword) {
       return res.status(400).json({
         message: "New passwords do not match",
       });
     }
 
-    // 3. Validate new password
+    // Password validation
     if (newPassword.length < 6) {
       return res.status(400).json({
         message: "Password must be at least 6 characters",
@@ -60,12 +88,8 @@ const changePassword = async (req, res) => {
       });
     }
 
-    // 4. Find user
-    const user = await User.findOne({
-      where: {
-        email: email.trim(),
-      },
-    });
+    // Find user using the ID from the verified JWT
+    const user = await User.findByPk(req.user.id);
 
     if (!user) {
       return res.status(404).json({
@@ -73,7 +97,7 @@ const changePassword = async (req, res) => {
       });
     }
 
-    // 5. Verify current password
+    // Verify current password
     const passwordMatch = await bcrypt.compare(
       currentPassword,
       user.password
@@ -85,13 +109,13 @@ const changePassword = async (req, res) => {
       });
     }
 
-    // 6. Hash new password
+    // Hash new password
     const hashedPassword = await bcrypt.hash(
       newPassword,
       10
     );
 
-    // 7. Update user
+    // Update password
     await user.update({
       password: hashedPassword,
       mustChangePassword: false,
@@ -111,4 +135,5 @@ const changePassword = async (req, res) => {
   }
 };
 
+export { changePassword, forgotPassword };
 export default changePassword;

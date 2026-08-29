@@ -28,13 +28,18 @@ const User = sequelize.define("User", {
     type: DataTypes.ENUM(
       "student",
       "academic_supervisor",
-      "professional",
       "admin"
     ),
     allowNull: false,
   },
 
   mustChangePassword: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
+
+  active: {
     type: DataTypes.BOOLEAN,
     allowNull: false,
     defaultValue: true,
