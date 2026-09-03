@@ -45,6 +45,16 @@ const getMyProfile = async (req, res) => {
                 "role",
               ],
             },
+            {
+              model: User,
+              as: "professionalSupervisor",
+              attributes: [
+                "id",
+                "name",
+                "email",
+                "role",
+              ],
+            },
           ],
         },
       ],
@@ -78,6 +88,15 @@ const getMyProfile = async (req, res) => {
                     id: student.internship.academicSupervisor.id,
                     name: student.internship.academicSupervisor.name,
                     email: student.internship.academicSupervisor.email,
+                  }
+                : null,
+
+            professionalSupervisor:
+              student.internship.professionalSupervisor
+                ? {
+                    id: student.internship.professionalSupervisor.id,
+                    name: student.internship.professionalSupervisor.name,
+                    email: student.internship.professionalSupervisor.email,
                   }
                 : null,
           }
@@ -207,11 +226,13 @@ const getMyMeetings = async (req, res) => {
       return res.status(404).json({ message: "Student profile not found" });
     }
 
-    const meetings = await Meeting.findAll({
+    const now = new Date();
+
+    const upcomingMeetings = await Meeting.findAll({
       where: {
         studentId: student.id,
         status: "scheduled",
-        date: { [Op.gte]: new Date() },
+        date: { [Op.gte]: now },
       },
       include: [
         {
@@ -223,7 +244,27 @@ const getMyMeetings = async (req, res) => {
       order: [["date", "ASC"]],
     });
 
-    return res.status(200).json({ meetings });
+    const meetingHistory = await Meeting.findAll({
+      where: {
+        studentId: student.id,
+        date: { [Op.lt]: now },
+      },
+      include: [
+        {
+          model: User,
+          as: "creator",
+          attributes: ["id", "name", "email"],
+        },
+      ],
+      order: [["date", "DESC"]],
+      limit: 20,
+    });
+
+    return res.status(200).json({
+      meetings: upcomingMeetings,
+      upcomingMeetings,
+      meetingHistory,
+    });
   } catch (error) {
     console.error("GET MY MEETINGS ERROR:", error);
     return res.status(500).json({
@@ -514,15 +555,25 @@ const getMyFinalGrade = async (req, res) => {
     const internship = await Internship.findOne({ where: { studentId: student.id } });
     if (!internship) return res.status(404).json({ message: "Internship not found" });
 
-    const maxTotal = internship.gradeBreakdown?.reduce((sum, item) => sum + (item.max || 0), 0) || 0;
+    const academicMaxTotal = internship.academicGradeBreakdown?.reduce((sum, item) => sum + (item.max || 0), 0) || 20;
+    const professionalMaxTotal = internship.professionalGradeBreakdown?.reduce((sum, item) => sum + (item.max || 0), 0) || 10;
 
     return res.status(200).json({
       grade: {
-        finalGrade: internship.finalGrade,
-        maxTotal,
-        breakdown: internship.gradeBreakdown,
-        gradeStatus: internship.gradeStatus,
-        gradeSubmittedAt: internship.gradeSubmittedAt,
+        academic: {
+          finalGrade: internship.academicGrade,
+          maxTotal: academicMaxTotal,
+          breakdown: internship.academicGradeBreakdown,
+          gradeStatus: internship.academicGradeStatus,
+          gradeSubmittedAt: internship.academicGradeSubmittedAt,
+        },
+        professional: {
+          finalGrade: internship.professionalGrade,
+          maxTotal: professionalMaxTotal,
+          breakdown: internship.professionalGradeBreakdown,
+          gradeStatus: internship.professionalGradeStatus,
+          gradeSubmittedAt: internship.professionalGradeSubmittedAt,
+        },
       },
     });
   } catch (error) {
@@ -536,26 +587,50 @@ const getMySupervisorFeedback = async (req, res) => {
     const student = await Student.findOne({ where: { userId: req.user.id } });
     if (!student) return res.status(404).json({ message: "Student profile not found" });
 
-    const reports = await Report.findAll({
-      where: { studentId: student.id, supervisorFeedback: { [Op.not]: null } },
-      attributes: ["id", "title", "supervisorFeedback", "supervisorFeedbackAt"],
-      order: [["supervisorFeedbackAt", "DESC"]],
-    });
-
     const internship = await Internship.findOne({
       where: { studentId: student.id },
-      include: [{ model: User, as: "academicSupervisor", attributes: ["name"] }],
+      include: [
+        { model: User, as: "academicSupervisor", attributes: ["id", "name"] },
+        { model: User, as: "professionalSupervisor", attributes: ["id", "name"] },
+      ],
     });
-    const supervisorName = internship?.academicSupervisor?.name || "Your supervisor";
 
-    const feedback = reports.map((r) => ({
-      reportTitle: r.title,
-      feedback: r.supervisorFeedback,
-      givenAt: r.supervisorFeedbackAt,
-      supervisorName,
-    }));
+    const academicSupervisorName = internship?.academicSupervisor?.name || "Academic Supervisor";
+    const professionalSupervisorName = internship?.professionalSupervisor?.name || "Professional Supervisor";
 
-    return res.status(200).json({ feedback });
+    const tasks = await Task.findAll({
+      where: { studentId: student.id },
+      attributes: [
+        "id", "title", "feedbackAcademic", "feedbackAcademicAt", "feedbackAcademicBy",
+        "feedbackProfessional", "feedbackProfessionalAt", "feedbackProfessionalBy",
+      ],
+      order: [["updatedAt", "DESC"]],
+    });
+
+    const academicFeedback = tasks
+      .filter((t) => t.feedbackAcademic)
+      .map((t) => ({
+        taskTitle: t.title,
+        feedback: t.feedbackAcademic,
+        givenAt: t.feedbackAcademicAt,
+        supervisorName: academicSupervisorName,
+        supervisorType: "academic",
+      }));
+
+    const professionalFeedback = tasks
+      .filter((t) => t.feedbackProfessional)
+      .map((t) => ({
+        taskTitle: t.title,
+        feedback: t.feedbackProfessional,
+        givenAt: t.feedbackProfessionalAt,
+        supervisorName: professionalSupervisorName,
+        supervisorType: "professional",
+      }));
+
+    return res.status(200).json({
+      academicFeedback,
+      professionalFeedback,
+    });
   } catch (error) {
     console.error("GET MY SUPERVISOR FEEDBACK ERROR:", error);
     return res.status(500).json({ message: "Server error while fetching feedback", error: error.message });

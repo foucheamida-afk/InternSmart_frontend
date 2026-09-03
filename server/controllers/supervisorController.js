@@ -6,6 +6,14 @@ import Student from "../models/studentModel.js";
 import User from "../models/userModel.js";
 import Internship from "../models/studentAssignmentModel.js";
 
+const generateJitsiLink = (meetingId, title) => {
+  const slug = `${title || "meeting"}-${meetingId}-${Date.now()}`
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `https://meet.jit.si/${slug}`;
+};
+
 // GET /api/supervisor/my-interns
 export const getMyInterns = async (req, res) => {
   try {
@@ -28,19 +36,24 @@ export const getMyInterns = async (req, res) => {
       ],
     });
 
-    const interns = internships.map((internship) => ({
-      id: internship.student?.id,
-      name: internship.student?.user?.name,
-      email: internship.student?.user?.email,
-      matricule: internship.student?.matricule,
-      class: internship.student?.class,
-      company: internship.company,
-    })).filter((i) => i.id); // filter out any broken records
+    const interns = await Promise.all(internships.map(async (internship) => {
+      const report = await Report.findOne({
+        where: { studentId: internship.studentId },
+        order: [["updatedAt", "DESC"], ["id", "DESC"]],
+        attributes: ["id"],
+      });
+      return {
+        id: internship.student?.id,
+        name: internship.student?.user?.name,
+        email: internship.student?.user?.email,
+        matricule: internship.student?.matricule,
+        class: internship.student?.class,
+        company: internship.company,
+        reportId: report?.id || null,
+      };
+    })).then((items) => items.filter((item) => item.id));
 
-    return res.status(200).json({
-      interns,
-      total: interns.length,
-    });
+    return res.status(200).json({ interns, total: interns.length });
   } catch (error) {
     console.error("GET MY INTERNS ERROR:", error);
     return res.status(500).json({
@@ -115,27 +128,40 @@ export const getSupervisorMeetings = async (req, res) => {
 export const createSupervisorMeeting = async (req, res) => {
   try {
     const supervisorId = req.user.id;
-    const { studentId, title, description, date, location, meetingLink } = req.body;
+    const { studentId, studentIds, title, description, date, location, meetingLink, isGroupMeeting } = req.body;
 
-    if (!studentId || !title || !date) {
-      return res.status(400).json({ message: "Student, title, and date are required" });
+    if (!title || !date) {
+      return res.status(400).json({ message: "title and date are required" });
     }
 
-    const internship = await Internship.findOne({
-      where: { studentId, academicSupervisorId: supervisorId },
-    });
-
-    if (!internship) {
-      return res.status(403).json({ message: "You are not assigned to this student" });
+    if (!studentId && !studentIds?.length) {
+      return res.status(400).json({ message: "Select at least one student" });
     }
+
+    const selectedStudentIds = isGroupMeeting && studentIds ? studentIds : [studentId];
+
+    for (const sid of selectedStudentIds) {
+      const internship = await Internship.findOne({
+        where: { studentId: sid, academicSupervisorId: supervisorId },
+      });
+      if (!internship) {
+        return res.status(403).json({ message: "You are not assigned to one or more selected students" });
+      }
+    }
+
+    const jitsiLink = meetingLink?.startsWith("https://meet.jit.si/")
+      ? meetingLink
+      : generateJitsiLink(supervisorId, title);
 
     const meeting = await Meeting.create({
-      studentId,
+      studentId: isGroupMeeting ? null : selectedStudentIds[0],
+      studentIds: isGroupMeeting ? selectedStudentIds : null,
+      isGroupMeeting: !!isGroupMeeting,
       title,
       description: description || "",
       date,
       location: location || null,
-      meetingLink: meetingLink || null,
+      meetingLink: jitsiLink,
       status: "scheduled",
       createdBy: supervisorId,
     });
@@ -161,7 +187,7 @@ export const createSupervisorMeeting = async (req, res) => {
       meeting: createdMeeting,
     });
   } catch (error) {
-    console.error("CREATE MEETING ERROR:", error);
+    console.error("CREATE SUPERVISOR MEETING ERROR:", error);
     return res.status(500).json({
       message: "Server error while creating meeting",
       error: error.message,
@@ -195,7 +221,11 @@ export const updateSupervisorMeeting = async (req, res) => {
       updateData.date = meetingDate;
     }
     if (location !== undefined) updateData.location = location;
-    if (meetingLink !== undefined) updateData.meetingLink = meetingLink;
+    if (meetingLink !== undefined) {
+      updateData.meetingLink = meetingLink.startsWith("https://meet.jit.si/")
+        ? meetingLink
+        : generateJitsiLink(`${supervisorId}-${id}`, title || meeting.title);
+    }
     if (status !== undefined) updateData.status = status;
 
     await meeting.update(updateData);
@@ -236,6 +266,42 @@ export const deleteSupervisorMeeting = async (req, res) => {
     console.error("DELETE MEETING ERROR:", error);
     return res.status(500).json({
       message: "Server error while deleting meeting",
+      error: error.message,
+    });
+  }
+};
+
+// PUT /api/supervisor/meetings/:id/initiate
+export const initiateMeeting = async (req, res) => {
+  try {
+    const supervisorId = req.user.id;
+    const { id } = req.params;
+
+    const meeting = await Meeting.findOne({
+      where: { id, createdBy: supervisorId },
+    });
+
+    if (!meeting) {
+      return res.status(404).json({ message: "Meeting not found" });
+    }
+
+    const updatedLink = meeting.meetingLink?.startsWith("https://meet.jit.si/")
+      ? meeting.meetingLink
+      : generateJitsiLink(`academic-${supervisorId}-${id}`, meeting.title);
+    await meeting.update({
+      status: "scheduled",
+      meetingLink: updatedLink,
+    });
+
+    return res.status(200).json({
+      message: "Meeting initiated successfully",
+      meeting,
+      link: updatedLink,
+    });
+  } catch (error) {
+    console.error("INITIATE SUPERVISOR MEETING ERROR:", error);
+    return res.status(500).json({
+      message: "Server error while initiating meeting",
       error: error.message,
     });
   }
@@ -444,15 +510,15 @@ export const getFinalGrade = async (req, res) => {
       return res.status(403).json({ message: "You are not assigned to this student" });
     }
 
-    const maxTotal = internship.gradeBreakdown?.reduce((sum, item) => sum + (item.max || 0), 0) || 0;
+    const maxTotal = internship.academicGradeBreakdown?.reduce((sum, item) => sum + (item.max || 0), 0) || 0;
 
     return res.status(200).json({
       grade: {
-        finalGrade: internship.finalGrade,
+        finalGrade: internship.academicGrade,
         maxTotal,
-        breakdown: internship.gradeBreakdown,
-        gradeStatus: internship.gradeStatus,
-        gradeSubmittedAt: internship.gradeSubmittedAt,
+        breakdown: internship.academicGradeBreakdown,
+        gradeStatus: internship.academicGradeStatus,
+        gradeSubmittedAt: internship.academicGradeSubmittedAt,
       },
     });
   } catch (error) {
@@ -490,19 +556,19 @@ export const submitFinalGrade = async (req, res) => {
     const maxTotal = normalized.reduce((sum, item) => sum + item.max, 0);
 
     await internship.update({
-      finalGrade: total,
-      gradeBreakdown: normalized,
-      gradeStatus: "submitted",
-      gradeSubmittedAt: new Date(),
-      gradeSubmittedBy: supervisorId,
+      academicGrade: total,
+      academicGradeBreakdown: normalized,
+      academicGradeStatus: "submitted",
+      academicGradeSubmittedAt: new Date(),
+      academicGradeSubmittedBy: supervisorId,
     });
 
     const student = await Student.findByPk(studentId);
     if (student?.userId) {
       await Notification.create({
         userId: student.userId,
-        title: "Final internship grade submitted",
-        message: `Your supervisor submitted your final grade: ${total}/${maxTotal}.`,
+        title: "Academic supervisor grade submitted",
+        message: `Your academic supervisor submitted your grade: ${total}/${maxTotal} (20%).`,
         type: "success",
       });
     }
@@ -514,7 +580,7 @@ export const submitFinalGrade = async (req, res) => {
         maxTotal,
         breakdown: normalized,
         gradeStatus: "submitted",
-        gradeSubmittedAt: internship.gradeSubmittedAt,
+        gradeSubmittedAt: internship.academicGradeSubmittedAt,
       },
     });
   } catch (error) {

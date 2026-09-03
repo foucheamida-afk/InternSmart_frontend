@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
+import User from "../models/userModel.js";
 
-const protect = (req, res, next) => {
+const protect = async (req, res, next) => {
   try {
     console.log("AUTH MIDDLEWARE REACHED");
 
@@ -22,6 +23,13 @@ const protect = (req, res, next) => {
       token,
       process.env.JWT_SECRET
     );
+
+    const user = await User.findByPk(decoded.id, { attributes: ["id", "active"] });
+    if (!user || !user.active) {
+      return res.status(403).json({
+        message: "This account has been deactivated. Please contact your administrator.",
+      });
+    }
 
     console.log("TOKEN VERIFIED:", decoded);
 

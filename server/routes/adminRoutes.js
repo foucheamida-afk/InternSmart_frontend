@@ -14,6 +14,7 @@ import {
   toggleUserStatus,
   resetUserPassword,
   createUser,
+  resendUserAccountEmail,
   getAllStudents,
   getAllSupervisors,
   getAllInternships,
@@ -74,6 +75,7 @@ router.get("/chart-data", protect, authorize("admin"), getChartData);
 router.get("/users", protect, authorize("admin"), getAllUsers);
 router.get("/users/:id", protect, authorize("admin"), getUserDetail);
 router.post("/users", protect, authorize("admin"), createUser);
+router.post("/users/:id/resend-account-email", protect, authorize("admin"), resendUserAccountEmail);
 router.put("/users/:id", protect, authorize("admin"), updateUser);
 router.put("/users/:id/status", protect, authorize("admin"), toggleUserStatus);
 router.put("/users/:id/reset-password", protect, authorize("admin"), resetUserPassword);

@@ -58,6 +58,30 @@ const Task = sequelize.define("Task", {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  feedbackAcademic: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  feedbackAcademicAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+  feedbackAcademicBy: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+  feedbackProfessional: {
+    type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  feedbackProfessionalAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+  feedbackProfessionalBy: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
 });
 
 export default Task;

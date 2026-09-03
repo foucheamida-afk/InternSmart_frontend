@@ -4,15 +4,27 @@ import Student from "../models/studentModel.js";
 import User from "../models/userModel.js";
 import { Op } from "sequelize";
 
+const generateJitsiLink = (meetingId, title) => {
+  const slug = `${title || "meeting"}-${meetingId}-${Date.now()}`
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `https://meet.jit.si/${slug}`;
+};
+
 // ─── SUPERVISOR: Schedule a meeting ─────────────────────────────────────────
 // POST /api/meetings/schedule
 export const scheduleMeeting = async (req, res) => {
   try {
     const supervisorId = req.user.id;
-    const { studentId, title, description, date, location, meetingLink } = req.body;
+    const { studentId, studentIds, title, description, date, location, meetingLink, isGroupMeeting } = req.body;
 
-    if (!studentId || !title || !date) {
-      return res.status(400).json({ message: "studentId, title, and date are required" });
+    if (!title || !date) {
+      return res.status(400).json({ message: "title and date are required" });
+    }
+
+    if (!studentId && !studentIds?.length) {
+      return res.status(400).json({ message: "Select at least one student" });
     }
 
     const meetingDate = new Date(date);
@@ -20,21 +32,30 @@ export const scheduleMeeting = async (req, res) => {
       return res.status(400).json({ message: "Please choose a future date and time for the meeting" });
     }
 
-    // Verify the supervisor is assigned to this student
-    const internship = await Internship.findOne({
-      where: { studentId, academicSupervisorId: supervisorId },
-    });
-    if (!internship) {
-      return res.status(403).json({ message: "You are not assigned to this student" });
+    const selectedStudentIds = isGroupMeeting && studentIds ? studentIds : [studentId];
+
+    for (const sid of selectedStudentIds) {
+      const internship = await Internship.findOne({
+        where: { studentId: sid, academicSupervisorId: supervisorId },
+      });
+      if (!internship) {
+        return res.status(403).json({ message: "You are not assigned to one or more selected students" });
+      }
     }
 
+    const jitsiLink = meetingLink?.startsWith("https://meet.jit.si/")
+      ? meetingLink
+      : generateJitsiLink(`supervisor-${supervisorId}`, title);
+
     const meeting = await Meeting.create({
-      studentId,
+      studentId: isGroupMeeting ? null : selectedStudentIds[0],
+      studentIds: isGroupMeeting ? selectedStudentIds : null,
+      isGroupMeeting: !!isGroupMeeting,
       title,
       description: description || "",
       date: meetingDate,
       location: location || null,
-      meetingLink: meetingLink || null,
+      meetingLink: jitsiLink,
       status: "scheduled",
       createdBy: supervisorId,
     });
@@ -104,7 +125,11 @@ export const updateMeeting = async (req, res) => {
     if (description !== undefined) updateData.description = description;
     if (date !== undefined) updateData.date = date;
     if (location !== undefined) updateData.location = location;
-    if (meetingLink !== undefined) updateData.meetingLink = meetingLink;
+    if (meetingLink !== undefined) {
+      updateData.meetingLink = meetingLink.startsWith("https://meet.jit.si/")
+        ? meetingLink
+        : generateJitsiLink(`supervisor-${supervisorId}-${id}`, title || meeting.title);
+    }
     if (status !== undefined) updateData.status = status;
 
     await meeting.update(updateData);
@@ -147,8 +172,9 @@ export const initiateMeeting = async (req, res) => {
       return res.status(404).json({ message: "Meeting not found" });
     }
 
-    // Optionally generate a simple meeting link if none exists
-    const updatedLink = meeting.meetingLink || `https://meet.internsmart.app/room/${id}-${Date.now()}`;
+    const updatedLink = meeting.meetingLink?.startsWith("https://meet.jit.si/")
+      ? meeting.meetingLink
+      : generateJitsiLink(`supervisor-${supervisorId}-${id}`, meeting.title);
 
     await meeting.update({ status: "scheduled", meetingLink: updatedLink });
     return res.status(200).json({ message: "Meeting initiated", meeting, link: updatedLink });
@@ -169,10 +195,12 @@ export const getStudentMeetings = async (req, res) => {
       return res.status(404).json({ message: "Student profile not found" });
     }
 
-    const meetings = await Meeting.findAll({
+    const now = new Date();
+
+    const upcomingMeetings = await Meeting.findAll({
       where: {
         studentId: student.id,
-        date: { [Op.gte]: new Date() },
+        date: { [Op.gte]: now },
         status: "scheduled",
       },
       include: [
@@ -181,7 +209,23 @@ export const getStudentMeetings = async (req, res) => {
       order: [["date", "ASC"]],
     });
 
-    return res.status(200).json({ meetings });
+    const meetingHistory = await Meeting.findAll({
+      where: {
+        studentId: student.id,
+        date: { [Op.lt]: now },
+      },
+      include: [
+        { model: User, as: "creator", attributes: ["id", "name", "email"] },
+      ],
+      order: [["date", "DESC"]],
+      limit: 20,
+    });
+
+    return res.status(200).json({
+      meetings: upcomingMeetings,
+      upcomingMeetings,
+      meetingHistory,
+    });
   } catch (error) {
     console.error("GET STUDENT MEETINGS ERROR:", error);
     return res.status(500).json({ message: "Server error", error: error.message });

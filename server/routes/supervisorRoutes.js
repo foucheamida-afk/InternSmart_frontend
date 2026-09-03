@@ -7,6 +7,7 @@ import {
   createSupervisorMeeting,
   updateSupervisorMeeting,
   deleteSupervisorMeeting,
+  initiateMeeting,
   getSupervisorNotifications,
   markSupervisorNotificationRead,
   getSupervisorReports,
@@ -25,6 +26,7 @@ router.get("/meetings", protect, authorize("academic_supervisor"), getSupervisor
 router.post("/meetings", protect, authorize("academic_supervisor"), createSupervisorMeeting);
 router.put("/meetings/:id", protect, authorize("academic_supervisor"), updateSupervisorMeeting);
 router.delete("/meetings/:id", protect, authorize("academic_supervisor"), deleteSupervisorMeeting);
+router.put("/meetings/:id/initiate", protect, authorize("academic_supervisor"), initiateMeeting);
 
 // Notifications
 router.get("/notifications", protect, authorize("academic_supervisor"), getSupervisorNotifications);

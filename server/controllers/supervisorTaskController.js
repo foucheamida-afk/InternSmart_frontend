@@ -254,6 +254,9 @@ export const submitTaskFeedback = async (req, res) => {
     await task.update({
       feedback: feedback.trim(),
       feedbackAt: new Date(),
+      feedbackAcademic: feedback.trim(),
+      feedbackAcademicAt: new Date(),
+      feedbackAcademicBy: supervisorId,
     });
 
     return res.status(200).json({ message: "Feedback submitted", task });

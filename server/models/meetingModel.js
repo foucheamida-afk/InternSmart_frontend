@@ -40,6 +40,15 @@ const Meeting = sequelize.define("Meeting", {
     type: DataTypes.INTEGER,
     allowNull: true,
   },
+  studentIds: {
+    type: DataTypes.JSON,
+    allowNull: true,
+  },
+  isGroupMeeting: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
 });
 
 export default Meeting;

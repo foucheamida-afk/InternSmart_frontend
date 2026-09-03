@@ -68,6 +68,10 @@ const Report = sequelize.define("Report", {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  documentContent: {
+    type: DataTypes.JSON,
+    allowNull: true,
+  },
 });
 
 export default Report;

@@ -6,11 +6,12 @@ import Meeting from "./meetingModel.js";
 import Notification from "./notificationModel.js";
 import DefenseAlert from "./defenseAlertModel.js";
 import Task from "./taskModel.js";
+import ReportComment from "./reportCommentModel.js";
 
 // User → Student
 User.hasOne(Student, {
   foreignKey: "userId",
-  as: "studentProfile",
+  as: "student",
 });
 
 Student.belongsTo(User, {
@@ -40,6 +41,17 @@ Internship.belongsTo(User, {
   as: "academicSupervisor",
 });
 
+// Professional Supervisor → Internships
+User.hasMany(Internship, {
+  foreignKey: "professionalSupervisorId",
+  as: "professionalInternships",
+});
+
+Internship.belongsTo(User, {
+  foreignKey: "professionalSupervisorId",
+  as: "professionalSupervisor",
+});
+
 // Student → Reports
 Student.hasMany(Report, {
   foreignKey: "studentId",
@@ -50,6 +62,11 @@ Report.belongsTo(Student, {
   foreignKey: "studentId",
   as: "student",
 });
+
+Report.hasMany(ReportComment, { foreignKey: "reportId", as: "comments" });
+ReportComment.belongsTo(Report, { foreignKey: "reportId", as: "report" });
+User.hasMany(ReportComment, { foreignKey: "userId", as: "reportComments" });
+ReportComment.belongsTo(User, { foreignKey: "userId", as: "author" });
 
 // User → Meetings (creator)
 User.hasMany(Meeting, {
@@ -114,6 +131,7 @@ export {
   Notification,
   DefenseAlert,
   Task,
+  ReportComment,
 };
 
 export default Internship;

@@ -15,7 +15,12 @@ const Internship = sequelize.define("Internship", {
 
   academicSupervisorId: {
     type: DataTypes.INTEGER,
-    allowNull: false,
+    allowNull: true,
+  },
+
+  professionalSupervisorId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
   },
 
   company: {
@@ -45,6 +50,58 @@ const Internship = sequelize.define("Internship", {
   },
 
   gradeSubmittedBy: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+
+  academicGrade: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+  },
+
+  academicGradeBreakdown: {
+    type: DataTypes.JSON,
+    allowNull: true,
+  },
+
+  academicGradeStatus: {
+    type: DataTypes.ENUM("pending", "submitted"),
+    allowNull: false,
+    defaultValue: "pending",
+  },
+
+  academicGradeSubmittedAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+
+  academicGradeSubmittedBy: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
+
+  professionalGrade: {
+    type: DataTypes.FLOAT,
+    allowNull: true,
+  },
+
+  professionalGradeBreakdown: {
+    type: DataTypes.JSON,
+    allowNull: true,
+  },
+
+  professionalGradeStatus: {
+    type: DataTypes.ENUM("pending", "submitted"),
+    allowNull: false,
+    defaultValue: "pending",
+  },
+
+  professionalGradeSubmittedAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+
+  professionalGradeSubmittedBy: {
     type: DataTypes.INTEGER,
     allowNull: true,
   },
