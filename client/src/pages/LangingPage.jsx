@@ -16,6 +16,8 @@ import {
   FiTrendingUp,
   FiUsers,
 } from 'react-icons/fi'
+import logoImg from '@assets/images/logo.png'
+import ThemeToggle from '../components/ThemeToggle'
 
 const featureCards = [
   {
@@ -75,22 +77,22 @@ const trustLogos = ['LSE', 'NUS', 'ETH', 'MIT', 'Imperial', 'Harvard', 'Oxford',
 
 const testimonials = [
   {
-    name: 'Anne K.',
+    name: 'Amida F.',
     role: 'Student',
     text: 'InternSmart made it easy to see where I stood at every stage. The AI feedback was practical and gave me clear, actionable next steps.',
-    initials: 'AK',
+    initials: 'AF',
+  },
+  {
+    name: 'Mr. Agbor.',
+    role: 'Supervisor',
+    text: 'The platform helps me review reports consistently, track student progress and keep every decision documented without losing time.',
+    initials: 'AD',
   },
   {
     name: 'Mr. Kapnang.',
-    role: 'Supervisor',
-    text: 'The platform helps me review reports consistently, track student progress and keep every decision documented without losing time.',
-    initials: 'JM',
-  },
-  {
-    name: 'Dr. Claire N.',
     role: 'Program Director',
     text: 'We gained visibility across our entire internship pipeline. It feels premium, secure and deeply aligned with how modern academic teams work.',
-    initials: 'CN',
+    initials: 'KN',
   },
 ]
 
@@ -204,28 +206,36 @@ function LandingPage() {
 
       <header className="fixed inset-x-0 top-0 z-50">
         <nav
-          className={`flex w-full items-center justify-between border-b border-white/10 bg-[#050608]/60 px-4 py-3 backdrop-blur-md sm:px-6 lg:px-8 ${
+          className={`flex w-full items-center justify-between border-b px-4 py-3 backdrop-blur-md sm:px-6 lg:px-8 ${
             isScrolled ? 'shadow-[0_10px_30px_rgba(0,0,0,0.25)]' : ''
           }`}
+          style={{
+            backgroundColor: 'var(--bg-panel)',
+            borderColor: 'var(--line)',
+            boxShadow: isScrolled ? '0 10px 30px rgba(0,0,0,0.25)' : 'none'
+          }}
         >
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-orange-400/80 bg-orange-500/10 text-[0.7rem] font-bold text-orange-300 shadow-[0_0_18px_rgba(255,122,0,0.28)]">
-              i
-            </span>
-            <span className="text-[1.13rem] font-bold tracking-[-0.03em] text-white">InternSmart</span>
+          <div className="flex items-center gap-3">
+            <img
+              src={logoImg}
+              alt="InternSmart logo"
+              className="h-11 w-11 rounded-2xl"
+            />
+            <span className="text-xl font-bold tracking-tight" style={{ color: 'var(--text)' }}>InternSmart</span>
           </div>
 
-          <div className="hidden items-center gap-7 text-[0.92rem] text-white/75 md:flex">
-            <a href="#home" className="transition hover:text-white">Home</a>
-            <a href="#features" className="transition hover:text-white">Features</a>
-            <a href="#about" className="transition hover:text-white">About Us</a>
-            <a href="#how-it-works" className="transition hover:text-white">How It Works</a>
-            <a href="#pricing" className="transition hover:text-white">Pricing</a>
-            <a href="#contact" className="transition hover:text-white">Contact</a>
+          <div className="hidden items-center gap-7 text-[0.92rem] md:flex" style={{ color: 'var(--text-soft)' }}>
+            <a href="#home" className="transition hover:text-[var(--text)]">Home</a>
+            <a href="#features" className="transition hover:text-[var(--text)]">Features</a>
+            <a href="#about" className="transition hover:text-[var(--text)]">About Us</a>
+            <a href="#how-it-works" className="transition hover:text-[var(--text)]">How It Works</a>
+            <a href="#pricing" className="transition hover:text-[var(--text)]">Pricing</a>
+            <a href="#contact" className="transition hover:text-[var(--text)]">Contact</a>
           </div>
 
           <div className="flex items-center gap-3">
-            <button onClick={() => navigate('/login')} type="button" className="hidden px-0 py-2 text-sm font-medium text-white/80 transition hover:text-white md:inline-flex">
+            <ThemeToggle />
+            <button onClick={() => navigate('/login')} type="button" className="hidden px-0 py-2 text-sm font-medium transition hover:text-[var(--text)] md:inline-flex" style={{ color: 'var(--text-soft)' }}>
               Log in
             </button>
             <button onClick={() => navigate('/login')} type="button" className="inline-flex items-center justify-center gap-2 rounded-full bg-linear-to-r from-[#ff7a00] via-[#ff8a1c] to-[#ff9d3d] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_18px_30px_rgba(255,122,0,0.2)] transition hover:-translate-y-0.5 cursor-pointer">
@@ -279,14 +289,14 @@ function LandingPage() {
 
               <div className="dashboard-panel" onMouseMove={handleMouseMove} onMouseLeave={() => setTilt({ x: 0, y: 0 })} style={dashboardTransform}>
                 <div className="dashboard-inner">
-                  <div className="dashboard-header">
+                  {/* <div className="dashboard-header">
                     <div className="window-actions">
                       <span />
                       <span />
                       <span />
                     </div>
                     <span>Dashboard</span>
-                  </div>
+                  </div> */}
 
                   <div className="dashboard-body">
                     <aside className="side-panel">
@@ -294,14 +304,14 @@ function LandingPage() {
                       <div className="supervisor-list">
                         <div className="supervisor">
                           <div>
-                            <strong>Dr. Rossi</strong>
+                            <strong>mr. Agbor</strong>
                             <span>Project Mentor</span>
                           </div>
                           <span className="status-pill">Online</span>
                         </div>
                         <div className="supervisor">
                           <div>
-                            <strong>Prof. Lee</strong>
+                            <strong>Mr. Monnette</strong>
                             <span>Research Lead</span>
                           </div>
                           <span className="status-pill">Review</span>
@@ -542,8 +552,12 @@ function LandingPage() {
           <div className="footer-grid">
             <div className="footer-brand">
               <div className="brand">
-                <span className="brand-mark">i</span>
-                InternSmart
+                <img
+                  src={logoImg}
+                  alt="InternSmart logo"
+                  className="h-8 w-8 rounded-xl"
+                />
+                <span>InternSmart</span>
               </div>
               <p>
                 A modern internship operating system for students, supervisors and institutions focused on
@@ -554,19 +568,19 @@ function LandingPage() {
             <div className="footer-column">
               <h4>Product</h4>
               <ul>
-                <li><a href="#features" className="hover:text-white transition">Features</a></li>
-                <li><a href="#how-it-works" className="hover:text-white transition">How It Works</a></li>
-                <li><a href="#pricing" className="hover:text-white transition">Pricing</a></li>
-                <li><button onClick={() => navigate('/login')} className="hover:text-white transition text-left cursor-pointer">Login</button></li>
+                <li><a href="#features" className="hover:text-[var(--text)] transition">Features</a></li>
+                <li><a href="#how-it-works" className="hover:text-[var(--text)] transition">How It Works</a></li>
+                <li><a href="#pricing" className="hover:text-[var(--text)] transition">Pricing</a></li>
+                <li><button onClick={() => navigate('/login')} className="hover:text-[var(--text)] transition text-left cursor-pointer">Login</button></li>
               </ul>
             </div>
 
             <div className="footer-column">
               <h4>Company</h4>
               <ul>
-                <li><a href="#about" className="hover:text-white transition">About Us</a></li>
-                <li><a href="#contact" className="hover:text-white transition">Contact</a></li>
-                <li><button onClick={() => navigate('/login')} className="hover:text-white transition text-left cursor-pointer">Portal Access</button></li>
+                <li><a href="#about" className="hover:text-[var(--text)] transition">About Us</a></li>
+                <li><a href="#contact" className="hover:text-[var(--text)] transition">Contact</a></li>
+                <li><button onClick={() => navigate('/login')} className="hover:text-[var(--text)] transition text-left cursor-pointer">Portal Access</button></li>
               </ul>
             </div>
 

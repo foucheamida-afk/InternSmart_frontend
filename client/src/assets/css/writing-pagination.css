@@ -1,0 +1,42 @@
+.writing-editor {
+  background: repeating-linear-gradient(to bottom, #fff 0, #fff 1123px, #dfe4e8 1123px, #dfe4e8 1165px);
+}
+
+.writing-editor [data-page-break] {
+  height: 1123px;
+  margin: 0 -90px;
+  border-top: 1px dashed #c3ccce;
+  border-bottom: 1px dashed #c3ccce;
+  background: #dfe4e8;
+  color: #7d8b90;
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  letter-spacing: .12em;
+  line-height: 1123px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.page-action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #cad3d4;
+  border-radius: 5px;
+  padding: 7px 9px;
+  background: #fff;
+  color: #59686d;
+  font-size: 11px;
+}
+
+.page-action-button:hover {
+  border-color: #e5a55d;
+  color: #ad6b2e;
+}
+
+@media (max-width: 850px) {
+  .writing-editor [data-page-break] {
+    margin-left: -28px;
+    margin-right: -28px;
+  }
+}

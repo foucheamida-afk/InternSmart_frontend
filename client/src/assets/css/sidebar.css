@@ -5,7 +5,7 @@
   top: 0;
   bottom: 0;
   width: 250px;
-  background: linear-gradient(180deg, rgba(5, 6, 8, 0.95) 0%, rgba(8, 11, 16, 0.95) 100%);
+  background: var(--bg-panel);
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -15,6 +15,10 @@
   z-index: 200;
   backdrop-filter: blur(10px);
   transition: transform 300ms ease-out;
+}
+
+[data-theme="dark"] .sidebar {
+  background: linear-gradient(180deg, rgba(5, 6, 8, 0.95) 0%, rgba(8, 11, 16, 0.95) 100%);
 }
 
 .sidebar.open {
@@ -52,14 +56,12 @@
 }
 
 .logo-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--orange), var(--orange-2));
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
   flex-shrink: 0;
 }
 
@@ -111,6 +113,10 @@
   background: rgba(255, 255, 255, 0.04);
 }
 
+[data-theme="light"] .sidebar-nav-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
 .sidebar-nav-item.active {
   background: linear-gradient(90deg, var(--orange), #D94E00);
   color: white;
@@ -147,6 +153,11 @@
   gap: 8px;
   position: relative;
   overflow: hidden;
+}
+
+[data-theme="light"] .sidebar-ai-card {
+  background: rgba(255, 122, 0, 0.08);
+  border: 1px solid rgba(255, 122, 0, 0.3);
 }
 
 .sidebar-ai-card::before {

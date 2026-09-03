@@ -9,7 +9,7 @@ const formatDate = (value) => {
   return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(date)
 }
 
-export default function InternshipTimeline() {
+export default function TimelineCard() {
   const [timeline, setTimeline] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -29,10 +29,8 @@ export default function InternshipTimeline() {
 
   if (loading) {
     return (
-      <div className="card internship-timeline-card flex flex-col min-h-[300px]">
-        <div className="card-header">
-          <h3 className="card-title">Internship Timeline</h3>
-        </div>
+      <div className="card p-5 flex flex-col min-h-[220px]">
+        <div className="card-header"><h3 className="card-title">Internship Timeline</h3></div>
         <div className="flex-1 flex items-center justify-center">
           <div className="h-6 w-6 animate-spin rounded-full border-3 border-orange-500 border-t-transparent" />
         </div>
@@ -40,17 +38,15 @@ export default function InternshipTimeline() {
     )
   }
 
-  const hasData = timeline && (timeline.startDate || timeline.endDate || (timeline.milestones && timeline.milestones.length > 0))
-
-  if (!hasData) {
+  if (!timeline || (!timeline.startDate && !timeline.endDate && (!timeline.milestones || timeline.milestones.length === 0))) {
     return (
-      <div className="card internship-timeline-card flex flex-col min-h-[300px]">
-        <div className="card-header">
-          <h3 className="card-title">Internship Timeline</h3>
-        </div>
-        <div className="flex-1 flex flex-col items-center justify-center text-center">
+      <div className="card p-5 flex flex-col">
+        <div className="card-header"><h3 className="card-title">Internship Timeline</h3></div>
+        <div className="flex-1 flex flex-col items-center justify-center text-center py-6">
           <CalendarClock size={32} style={{ color: 'var(--text-muted)' }} />
-          <p className="text-sm mt-3" style={{ color: 'var(--text-muted)' }}>No internship milestones available</p>
+          <p className="text-sm mt-3" style={{ color: 'var(--text-muted)' }}>
+            The internship timeline hasn&apos;t been configured yet.
+          </p>
         </div>
       </div>
     )
@@ -61,13 +57,21 @@ export default function InternshipTimeline() {
   const now = new Date()
   let progress = 0
   if (start && end && end > start) {
-    progress = Math.max(0, Math.min(100, Math.round(((now - start) / (end - start)) * 100)))
+    const total = end - start
+    const elapsed = now - start
+    progress = Math.max(0, Math.min(100, Math.round((elapsed / total) * 100)))
   }
 
-  const milestones = (timeline.milestones || []).slice().sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0))
+  const rawMilestones = timeline.milestones
+  const milestones = (Array.isArray(rawMilestones)
+    ? rawMilestones
+    : typeof rawMilestones === "string"
+      ? (() => { try { return JSON.parse(rawMilestones) } catch { return [] } })()
+      : []
+  ).slice().sort((a, b) => new Date(a.date || 0) - new Date(b.date || 0))
 
   return (
-    <div className="card internship-timeline-card flex flex-col">
+    <div className="card p-5 flex flex-col">
       <div className="card-header">
         <h3 className="card-title">Internship Timeline</h3>
         {timeline.label && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{timeline.label}</span>}
@@ -103,7 +107,10 @@ export default function InternshipTimeline() {
               <div key={index} className="flex items-start gap-3">
                 <div
                   className="mt-1 flex h-4 w-4 items-center justify-center rounded-full border"
-                  style={{ borderColor: isPast ? '#10b981' : 'var(--line)', backgroundColor: isPast ? '#10b981' : 'transparent' }}
+                  style={{
+                    borderColor: isPast ? '#10b981' : 'var(--line)',
+                    backgroundColor: isPast ? '#10b981' : 'transparent',
+                  }}
                 >
                   <Milestone size={10} style={{ color: isPast ? 'white' : 'var(--text-muted)' }} />
                 </div>

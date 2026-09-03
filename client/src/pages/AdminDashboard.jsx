@@ -22,10 +22,13 @@ import {
   LogOut,
   UserCheck,
   Building,
+  CalendarClock,
 } from 'lucide-react'
 import '../assets/css/dashboard.css'
 import '../assets/css/dashboard-components.css'
 import '../assets/css/sidebar.css'
+import ThemeToggle from '../components/ThemeToggle'
+import { adminApi } from '../services/adminService'
 
 export default function AdminDashboard() {
   const navigate = useNavigate()
@@ -49,6 +52,71 @@ export default function AdminDashboard() {
     { id: 'usr-4', name: 'Alex Johnson', email: 'alex.j@internsmart.edu', role: 'Student', department: 'Cloud Computing', status: 'Active', created: 'Feb 2025' },
     { id: 'usr-5', name: 'Sarah Lin', email: 'sarah.lin@internsmart.edu', role: 'Student', department: 'Cybersecurity', status: 'Active', created: 'Feb 2025' },
   ])
+
+  const [timeline, setTimeline] = useState(null)
+  const [isTimelineModalOpen, setIsTimelineModalOpen] = useState(false)
+  const [timelineForm, setTimelineForm] = useState({ label: '', startDate: '', endDate: '', milestones: [] })
+  const [timelineLoading, setTimelineLoading] = useState(false)
+  const [timelineError, setTimelineError] = useState('')
+
+  const fetchTimeline = async () => {
+    try {
+      const data = await adminApi.getTimeline()
+      const t = data.timeline || { label: '', startDate: '', endDate: '', milestones: [] }
+      setTimeline(t)
+    } catch (err) {
+      console.error('Fetch timeline error:', err)
+    }
+  }
+
+  useEffect(() => { fetchTimeline() }, [])
+
+  const openTimelineModal = () => {
+    const t = timeline || { label: '', startDate: '', endDate: '', milestones: [] }
+    setTimelineForm({
+      label: t.label || '',
+      startDate: t.startDate ? new Date(t.startDate).toISOString().slice(0, 10) : '',
+      endDate: t.endDate ? new Date(t.endDate).toISOString().slice(0, 10) : '',
+      milestones: (t.milestones || []).map((m) => ({ title: m.title, date: m.date ? new Date(m.date).toISOString().slice(0, 10) : '' })),
+    })
+    setTimelineError('')
+    setIsTimelineModalOpen(true)
+  }
+
+  const addMilestoneRow = () => {
+    setTimelineForm((prev) => ({ ...prev, milestones: [...prev.milestones, { title: '', date: '' }] }))
+  }
+
+  const updateMilestone = (index, field, value) => {
+    setTimelineForm((prev) => ({
+      ...prev,
+      milestones: prev.milestones.map((m, i) => (i === index ? { ...m, [field]: value } : m)),
+    }))
+  }
+
+  const removeMilestone = (index) => {
+    setTimelineForm((prev) => ({ ...prev, milestones: prev.milestones.filter((_, i) => i !== index) }))
+  }
+
+  const handleSaveTimeline = async () => {
+    setTimelineLoading(true)
+    setTimelineError('')
+    try {
+      const payload = {
+        label: timelineForm.label,
+        startDate: timelineForm.startDate || null,
+        endDate: timelineForm.endDate || null,
+        milestones: timelineForm.milestones.filter((m) => m.title && m.date),
+      }
+      const data = await adminApi.updateTimeline(payload)
+      setTimeline(data.timeline)
+      setIsTimelineModalOpen(false)
+    } catch (err) {
+      setTimelineError(err.response?.data?.message || 'Unable to save timeline')
+    } finally {
+      setTimelineLoading(false)
+    }
+  }
 
   const handleCreateUser = (e) => {
     e.preventDefault()
@@ -75,7 +143,9 @@ export default function AdminDashboard() {
 
   const filteredUsers = users.filter((u) => {
     const matchesSearch = u.name.toLowerCase().includes(searchQuery.toLowerCase()) || u.email.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesRole = roleFilter === 'all' || u.role.toLowerCase() === roleFilter.toLowerCase()
+    const matchesRole = roleFilter === 'all'
+      || (roleFilter === 'supervisor' && (u.role === 'academic_supervisor' || u.role === 'professional_supervisor'))
+      || u.role.toLowerCase() === roleFilter.toLowerCase()
     return matchesSearch && matchesRole
   })
 
@@ -91,9 +161,12 @@ export default function AdminDashboard() {
             <div className="logo-icon">
               <Zap size={20} />
             </div>
-            <div className="logo-text">
-              <div className="logo-brand">InternSmart</div>
-              <div className="logo-subtitle">ADMIN PORTAL</div>
+            <div className="flex">
+              <img
+                  src={logoImg}
+                  alt="InternSmart logo"
+                  className="flex h-11 w-11 items-center justify-center rounded-2xl shadow-sm transition group-hover:scale-105"
+              />
             </div>
           </div>
         </div>
@@ -110,6 +183,10 @@ export default function AdminDashboard() {
           <button type="button" className="sidebar-nav-item" onClick={() => navigate('/student')}>
             <UserCheck size={18} className="nav-icon" />
             <span className="nav-label">Student Portal</span>
+          </button>
+          <button type="button" className="sidebar-nav-item" onClick={openTimelineModal}>
+            <CalendarClock size={18} className="nav-icon" />
+            <span className="nav-label">Internship Timeline</span>
           </button>
         </nav>
 
@@ -137,6 +214,8 @@ export default function AdminDashboard() {
           </div>
 
           <div className="header-right">
+            <ThemeToggle />
+            
             <button className="notification-btn cursor-pointer">
               <Bell size={20} />
               <span className="notification-badge">5</span>
@@ -158,10 +237,15 @@ export default function AdminDashboard() {
               </div>
 
               {isUserMenuOpen && (
-                <div className="absolute right-0 mt-2 w-48 rounded-xl border border-white/10 bg-[#0d1419] p-2 shadow-2xl z-50 text-white text-xs">
+                <div className="absolute right-0 mt-2 w-48 rounded-xl border p-2 shadow-2xl z-50 text-xs" style={{
+                  backgroundColor: 'var(--bg-panel)',
+                  borderColor: 'var(--line)',
+                  color: 'var(--text)'
+                }}>
                   <button
                     onClick={() => navigate('/login')}
-                    className="w-full flex items-center gap-2 p-2 rounded hover:bg-red-500/20 text-red-300 text-left cursor-pointer"
+                    className="w-full flex items-center gap-2 p-2 rounded text-left cursor-pointer"
+                    style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}
                   >
                     <LogOut size={14} /> Sign out
                   </button>
@@ -227,29 +311,76 @@ export default function AdminDashboard() {
             </div>
           </div>
 
+          {/* Internship Timeline Section */}
+          <div className="card mb-8">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b pb-4 mb-4" style={{ borderColor: 'var(--line)' }}>
+              <div>
+                <h3 className="card-title">Internship Timeline</h3>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Configure the internship period and milestones visible to students & supervisors</p>
+              </div>
+              <button
+                onClick={openTimelineModal}
+                className="px-4 py-2 rounded-full bg-gradient-to-r from-[#ff7a00] to-[#ff9d3d] text-white text-xs font-semibold shadow-lg hover:opacity-90 transition cursor-pointer flex items-center gap-2"
+              >
+                <CalendarClock size={16} />
+                Configure Timeline
+              </button>
+            </div>
+
+            {timeline && (timeline.startDate || timeline.endDate || (timeline.milestones && timeline.milestones.length > 0)) ? (
+              <div className="space-y-3 text-sm">
+                <div className="flex flex-wrap items-center gap-3" style={{ color: 'var(--text-soft)' }}>
+                  {timeline.label && <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: 'rgba(255,122,0,0.12)', color: 'var(--orange-3)' }}>{timeline.label}</span>}
+                  {timeline.startDate && <span>Start: <strong>{new Date(timeline.startDate).toLocaleDateString()}</strong></span>}
+                  {timeline.endDate && <span>End: <strong>{new Date(timeline.endDate).toLocaleDateString()}</strong></span>}
+                </div>
+                {timeline.milestones && timeline.milestones.length > 0 && (
+                  <ul className="list-disc pl-5 space-y-1" style={{ color: 'var(--text-muted)' }}>
+                    {timeline.milestones.map((m, i) => (
+                      <li key={i}>{m.title} — {m.date ? new Date(m.date).toLocaleDateString() : '—'}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>No timeline configured yet. Click “Configure Timeline” to set the internship dates and milestones.</p>
+            )}
+          </div>
+
           {/* User Management Section */}
           <div className="card">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-white/10 pb-4 mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b pb-4 mb-4" style={{ borderColor: 'var(--line)' }}>
               <div>
                 <h3 className="card-title">Managed User Accounts ({filteredUsers.length})</h3>
-                <p className="text-xs text-white/50">Accounts provisioned by administrator</p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Accounts provisioned by administrator</p>
               </div>
 
               <div className="flex items-center gap-2">
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" size={14} />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2" size={14} style={{ color: 'var(--text-muted)' }} />
                   <input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search users..."
-                    className="rounded-xl border border-white/10 bg-[#070b0e] pl-9 pr-3 py-1.5 text-xs text-white placeholder:text-white/30 focus:border-orange-400 focus:outline-none"
+                    className="rounded-xl border pl-9 pr-3 py-1.5 text-xs focus:outline-none"
+                    style={{
+                      backgroundColor: 'var(--bg-panel)',
+                      borderColor: 'var(--line)',
+                      color: 'var(--text)',
+                      placeholderColor: 'var(--text-muted)'
+                    }}
                   />
                 </div>
 
                 <select
                   value={roleFilter}
                   onChange={(e) => setRoleFilter(e.target.value)}
-                  className="rounded-xl border border-white/10 bg-[#070b0e] px-3 py-1.5 text-xs text-white focus:border-orange-400 focus:outline-none"
+                  className="rounded-xl border px-3 py-1.5 text-xs focus:outline-none"
+                  style={{
+                    backgroundColor: 'var(--bg-panel)',
+                    borderColor: 'var(--line)',
+                    color: 'var(--text)'
+                  }}
                 >
                   <option value="all">All Roles</option>
                   <option value="student">Student</option>
@@ -260,9 +391,9 @@ export default function AdminDashboard() {
 
             {/* Table */}
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-white/80">
+              <table className="w-full text-left text-xs" style={{ color: 'var(--text-soft)' }}>
                 <thead>
-                  <tr className="border-b border-white/8 text-[11px] uppercase tracking-wider text-white/40">
+                  <tr className="border-b text-[11px] uppercase tracking-wider" style={{ borderColor: 'var(--line)', color: 'var(--text-muted)' }}>
                     <th className="pb-3 font-semibold">User</th>
                     <th className="pb-3 font-semibold">Role</th>
                     <th className="pb-3 font-semibold">Department</th>
@@ -270,35 +401,39 @@ export default function AdminDashboard() {
                     <th className="pb-3 font-semibold text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5">
+                <tbody className="divide-y" style={{ borderColor: 'var(--line)' }}>
                   {filteredUsers.map((u) => (
-                    <tr key={u.id} className="hover:bg-white/3 transition">
+                    <tr key={u.id} className="hover:bg-white/3 transition" style={{ backgroundColor: 'rgba(255,255,255,0.02)' }}>
                       <td className="py-3.5">
-                        <div className="font-semibold text-white">{u.name}</div>
-                        <div className="text-[11px] text-white/40">{u.email}</div>
+                        <div className="font-semibold">{u.name}</div>
+                        <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{u.email}</div>
                       </td>
                       <td className="py-3.5">
                         <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider ${
-                            u.role === 'Student'
-                              ? 'bg-orange-500/15 text-orange-300 border border-orange-500/30'
-                              : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
-                          }`}
+                          className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider border"
+                          style={{
+                            backgroundColor: u.role === 'Student' ? 'rgba(255, 122, 0, 0.15)' : 'rgba(99, 102, 241, 0.15)',
+                            color: u.role === 'Student' ? 'var(--orange-3)' : '#a5b4fc',
+                            borderColor: u.role === 'Student' ? 'rgba(255, 122, 0, 0.3)' : 'rgba(99, 102, 241, 0.3)'
+                          }}
                         >
                           {u.role}
                         </span>
                       </td>
-                      <td className="py-3.5 text-white/70">{u.department}</td>
+                      <td className="py-3.5" style={{ color: 'var(--text-soft)' }}>{u.department}</td>
                       <td className="py-3.5">
-                        <span className="inline-flex items-center gap-1 text-emerald-400">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                        <span className="inline-flex items-center gap-1" style={{ color: '#10b981' }}>
+                          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: '#10b981' }}></span>
                           {u.status}
                         </span>
                       </td>
                       <td className="py-3.5 text-right">
                         <button
                           onClick={() => handleDeleteUser(u.id)}
-                          className="p-1.5 rounded-lg text-white/40 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                          className="p-1.5 rounded-lg transition cursor-pointer"
+                          style={{ color: 'var(--text-muted)' }}
+                          onMouseEnter={(e) => e.target.style.color = '#f87171'}
+                          onMouseLeave={(e) => e.target.style.color = 'var(--text-muted)'}
                           title="Delete user account"
                         >
                           <Trash2 size={14} />
@@ -314,15 +449,22 @@ export default function AdminDashboard() {
           {/* Create User Modal */}
           {isCreateUserModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-              <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0d1419] p-6 shadow-2xl text-white">
-                <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
+              <div className="w-full max-w-md rounded-2xl border p-6 shadow-2xl" style={{
+                backgroundColor: 'var(--bg-panel)',
+                borderColor: 'var(--line)',
+                color: 'var(--text)'
+              }}>
+                <div className="flex items-center justify-between border-b pb-3 mb-4" style={{ borderColor: 'var(--line)' }}>
                   <div>
-                    <h3 className="text-base font-bold text-white">Provision New User Account</h3>
-                    <p className="text-xs text-white/50">Admin creates user credentials</p>
+                    <h3 className="text-base font-bold">Provision New User Account</h3>
+                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Admin creates user credentials</p>
                   </div>
                   <button
                     onClick={() => setIsCreateUserModalOpen(false)}
-                    className="rounded-full p-1 hover:bg-white/10 text-white/70 hover:text-white transition cursor-pointer"
+                    className="rounded-full p-1 transition cursor-pointer"
+                    style={{ color: 'var(--text-muted)' }}
+                    onMouseEnter={(e) => e.target.style.color = 'var(--text)'}
+                    onMouseLeave={(e) => e.target.style.color = 'var(--text-muted)'}
                   >
                     <X size={18} />
                   </button>
@@ -330,35 +472,52 @@ export default function AdminDashboard() {
 
                 <form onSubmit={handleCreateUser} className="space-y-4 text-xs">
                   <div>
-                    <label className="block text-white/70 font-semibold mb-1">Full Name</label>
+                    <label className="block font-semibold mb-1" style={{ color: 'var(--text-soft)' }}>Full Name</label>
                     <input
                       required
                       value={newUser.name}
                       onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
                       placeholder="e.g. John Doe"
-                      className="w-full rounded-xl border border-white/10 bg-[#070b0e] p-2.5 text-xs text-white placeholder:text-white/30 focus:border-orange-400 focus:outline-none"
+                      className="w-full rounded-xl border p-2.5 text-xs focus:outline-none"
+                      style={{
+                        backgroundColor: 'var(--bg-panel)',
+                        borderColor: 'var(--line)',
+                        color: 'var(--text)',
+                        placeholderColor: 'var(--text-muted)'
+                      }}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-white/70 font-semibold mb-1">Institutional Email</label>
+                    <label className="block font-semibold mb-1" style={{ color: 'var(--text-soft)' }}>Institutional Email</label>
                     <input
                       required
                       type="email"
                       value={newUser.email}
                       onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
                       placeholder="e.g. j.doe@internsmart.edu"
-                      className="w-full rounded-xl border border-white/10 bg-[#070b0e] p-2.5 text-xs text-white placeholder:text-white/30 focus:border-orange-400 focus:outline-none"
+                      className="w-full rounded-xl border p-2.5 text-xs focus:outline-none"
+                      style={{
+                        backgroundColor: 'var(--bg-panel)',
+                        borderColor: 'var(--line)',
+                        color: 'var(--text)',
+                        placeholderColor: 'var(--text-muted)'
+                      }}
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-white/70 font-semibold mb-1">Role</label>
+                      <label className="block font-semibold mb-1" style={{ color: 'var(--text-soft)' }}>Role</label>
                       <select
                         value={newUser.role}
                         onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                        className="w-full rounded-xl border border-white/10 bg-[#070b0e] p-2.5 text-xs text-white focus:border-orange-400 focus:outline-none"
+                        className="w-full rounded-xl border p-2.5 text-xs focus:outline-none"
+                        style={{
+                          backgroundColor: 'var(--bg-panel)',
+                          borderColor: 'var(--line)',
+                          color: 'var(--text)'
+                        }}
                       >
                         <option value="Student">Student</option>
                         <option value="Supervisor">Supervisor</option>
@@ -366,11 +525,16 @@ export default function AdminDashboard() {
                     </div>
 
                     <div>
-                      <label className="block text-white/70 font-semibold mb-1">Department</label>
+                      <label className="block font-semibold mb-1" style={{ color: 'var(--text-soft)' }}>Department</label>
                       <select
                         value={newUser.department}
                         onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
-                        className="w-full rounded-xl border border-white/10 bg-[#070b0e] p-2.5 text-xs text-white focus:border-orange-400 focus:outline-none"
+                        className="w-full rounded-xl border p-2.5 text-xs focus:outline-none"
+                        style={{
+                          backgroundColor: 'var(--bg-panel)',
+                          borderColor: 'var(--line)',
+                          color: 'var(--text)'
+                        }}
                       >
                         <option value="Software Engineering">Software Engineering</option>
                         <option value="Cloud Computing">Cloud Computing</option>
@@ -380,17 +544,29 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-white/10 flex justify-end gap-2">
+                  <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--line)' }}>
                     <button
                       type="button"
                       onClick={() => setIsCreateUserModalOpen(false)}
-                      className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white transition cursor-pointer"
+                      className="px-4 py-2 rounded-xl transition cursor-pointer"
+                      style={{
+                        backgroundColor: 'rgba(255,255,255,0.05)',
+                        color: 'var(--text)'
+                      }}
+                      onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.1)'}
+                      onMouseLeave={(e) => e.target.style.backgroundColor = 'rgba(255,255,255,0.05)'}
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold shadow-lg transition cursor-pointer"
+                      className="px-4 py-2 rounded-xl font-semibold shadow-lg transition cursor-pointer"
+                      style={{
+                        backgroundColor: '#f97316',
+                        color: 'white'
+                      }}
+                      onMouseEnter={(e) => e.target.style.backgroundColor = '#ea580c'}
+                      onMouseLeave={(e) => e.target.style.backgroundColor = '#f97316'}
                     >
                       Save & Provision Account
                     </button>
@@ -399,6 +575,138 @@ export default function AdminDashboard() {
               </div>
             </div>
           )}
+          {/* Timeline Config Modal */}
+          {isTimelineModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+              <div className="w-full max-w-lg rounded-2xl border p-6 shadow-2xl max-h-[90vh] overflow-y-auto" style={{
+                backgroundColor: 'var(--bg-panel)',
+                borderColor: 'var(--line)',
+                color: 'var(--text)'
+              }}>
+                <div className="flex items-center justify-between border-b pb-3 mb-4" style={{ borderColor: 'var(--line)' }}>
+                  <div>
+                    <h3 className="text-base font-bold">Configure Internship Timeline</h3>
+                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Visible to all students and supervisors</p>
+                  </div>
+                  <button
+                    onClick={() => setIsTimelineModalOpen(false)}
+                    className="rounded-full p-1 transition cursor-pointer"
+                    style={{ color: 'var(--text-muted)' }}
+                    onMouseEnter={(e) => e.target.style.color = 'var(--text)'}
+                    onMouseLeave={(e) => e.target.style.color = 'var(--text-muted)'}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="space-y-4 text-xs">
+                  <div>
+                    <label className="block font-semibold mb-1" style={{ color: 'var(--text-soft)' }}>Label (e.g. 2025/2026 Internship)</label>
+                    <input
+                      value={timelineForm.label}
+                      onChange={(e) => setTimelineForm({ ...timelineForm, label: e.target.value })}
+                      placeholder="Internship cycle"
+                      className="w-full rounded-xl border p-2.5 text-xs focus:outline-none"
+                      style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-semibold mb-1" style={{ color: 'var(--text-soft)' }}>Start Date</label>
+                      <input
+                        type="date"
+                        value={timelineForm.startDate}
+                        onChange={(e) => setTimelineForm({ ...timelineForm, startDate: e.target.value })}
+                        className="w-full rounded-xl border p-2.5 text-xs focus:outline-none"
+                        style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold mb-1" style={{ color: 'var(--text-soft)' }}>End Date</label>
+                      <input
+                        type="date"
+                        value={timelineForm.endDate}
+                        onChange={(e) => setTimelineForm({ ...timelineForm, endDate: e.target.value })}
+                        className="w-full rounded-xl border p-2.5 text-xs focus:outline-none"
+                        style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block font-semibold" style={{ color: 'var(--text-soft)' }}>Milestones</label>
+                      <button
+                        type="button"
+                        onClick={addMilestoneRow}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg cursor-pointer"
+                        style={{ color: 'var(--orange-3)', backgroundColor: 'rgba(255,122,0,0.1)' }}
+                      >
+                        <Plus size={12} /> Add
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {timelineForm.milestones.map((m, index) => (
+                        <div key={index} className="flex items-center gap-2">
+                          <input
+                            value={m.title}
+                            onChange={(e) => updateMilestone(index, 'title', e.target.value)}
+                            placeholder="Milestone title"
+                            className="flex-1 rounded-lg border p-2 text-xs focus:outline-none"
+                            style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                          />
+                          <input
+                            type="date"
+                            value={m.date}
+                            onChange={(e) => updateMilestone(index, 'date', e.target.value)}
+                            className="rounded-lg border p-2 text-xs focus:outline-none"
+                            style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeMilestone(index)}
+                            className="p-1.5 rounded-lg cursor-pointer"
+                            style={{ color: 'var(--text-muted)' }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      ))}
+                      {timelineForm.milestones.length === 0 && (
+                        <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>No milestones added.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {timelineError && (
+                    <p className="text-xs" style={{ color: '#ef4444' }}>{timelineError}</p>
+                  )}
+
+                  <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--line)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsTimelineModalOpen(false)}
+                      className="px-4 py-2 rounded-xl transition cursor-pointer"
+                      style={{ backgroundColor: 'rgba(255,255,255,0.05)', color: 'var(--text)' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveTimeline}
+                      disabled={timelineLoading}
+                      className="px-4 py-2 rounded-xl font-semibold shadow-lg transition cursor-pointer disabled:opacity-50"
+                      style={{ backgroundColor: '#f97316', color: 'white' }}
+                    >
+                      {timelineLoading ? 'Saving...' : 'Save Timeline'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
         </main>
       </div>
     </div>

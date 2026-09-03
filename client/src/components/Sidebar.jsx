@@ -1,9 +1,10 @@
 import React from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import logoImg from '../assets/images/logo.png'
+import logoImg from '@assets/images/logo.png'
 import {
   LayoutDashboard,
   FileText,
+  PenLine,
   Brain,
   Users,
   Settings,
@@ -18,8 +19,9 @@ export default function Sidebar({ isOpen, onToggle }) {
   const location = useLocation()
 
   const navItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/student', active: location.pathname === '/student' },
+    { icon: LayoutDashboard, label: 'Dashboard', path: '/student/dashboard', active: location.pathname === '/student/dashboard' },
     { icon: FileText, label: 'My Reports', path: '/my-reports', active: location.pathname === '/my-reports' },
+    { icon: PenLine, label: 'Writing Workspace', path: '/writing-workspace', active: location.pathname === '/writing-workspace' },
     { icon: Brain, label: 'AI Analysis', path: '/ai-analysis', active: location.pathname.startsWith('/ai-analysis') },
     { icon: Users, label: 'Supervisors', path: '/supervisors', active: location.pathname === '/supervisors' },
     { icon: Settings, label: 'Settings', path: '/settings', active: location.pathname === '/settings' },
@@ -40,7 +42,7 @@ export default function Sidebar({ isOpen, onToggle }) {
                 <img
                   src={logoImg}
                   alt="InternSmart logo"
-                  className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#F5A623] shadow-sm transition group-hover:scale-105"
+                  className="h-11 w-11 rounded-2xl"
                 />
               </div>
               <div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Brain,
@@ -25,8 +25,10 @@ import {
 } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
 import AnimatedProgressRing from '../components/dashboard/AnimatedProgressRing'
+import ThemeToggle from '../components/ThemeToggle'
 import '../assets/css/dashboard.css'
 import '../assets/css/dashboard-components.css'
+import api from "../api/axios";
 
 export default function AIFeedback() {
   const navigate = useNavigate()
@@ -35,66 +37,45 @@ export default function AIFeedback() {
   const [activeTab, setActiveTab] = useState('suggestions')
   const [copiedId, setCopiedId] = useState(null)
   const [chatInput, setChatInput] = useState('')
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      sender: 'ai',
-      text: "Hello Anita! I have analyzed your report 'AI-Powered Internship Platform' (v3). Your overall writing score is 8.4/10. What would you like assistance with?",
-      time: '10:02 AM',
-    },
-  ])
+  const [user, setUser] = useState(null)
+  const [loadingUser, setLoadingUser] = useState(true)
+  const [showProfileOverview, setShowProfileOverview] = useState(false)
 
-  const [user] = useState({
-    name: 'Anita',
-    role: 'Student',
-    program: 'Level 3',
-    department: 'Software Engineering',
-    avatar: null,
-    notifications: 2,
-  })
+  useEffect(() => {
+    const fetchStudentProfile = async () => {
+      try {
+        const token = localStorage.getItem('token')
 
-  const metrics = [
-    { name: 'Structure', score: 85, desc: 'Logical section progression and clear abstract/conclusion mapping' },
-    { name: 'Clarity', score: 90, desc: 'High readability index with concise phrasing' },
-    { name: 'Grammar & Tone', score: 88, desc: 'Formal academic tone; minor passive voice in Chapter 2' },
-    { name: 'Originality', score: 95, desc: '95% unique phrasing, authentic experimental descriptions' },
-    { name: 'References', score: 86, desc: 'Well formatted citations; 2 references missing year published' },
-  ]
+        if (!token) {
+          navigate('/login')
+          return
+        }
 
-  const suggestions = [
-    {
-      id: 1,
-      type: 'high',
-      section: 'Section 4.2 • System Evaluation',
-      title: 'Strengthen Benchmark Metrics',
-      desc: 'Include concrete execution latency comparisons (ms) rather than stating the system felt faster.',
-      suggestion: 'Replace "the query responded much faster" with "the response latency decreased from 420ms to 85ms (79.7% reduction)".',
-    },
-    {
-      id: 2,
-      type: 'medium',
-      section: 'Section 2.1 • Literature Review',
-      title: 'Active Voice Optimization',
-      desc: 'Three consecutive paragraphs in Section 2 use heavy passive constructions.',
-      suggestion: 'Rephrase "It was discovered by Smith et al. that..." to "Smith et al. discovered that...".',
-    },
-    {
-      id: 3,
-      type: 'positive',
-      section: 'Section 3 • System Architecture',
-      title: 'Excellent Architecture Diagram & Description',
-      desc: 'The component data-flow diagram and description are lucid, well structured, and technically accurate.',
-      suggestion: 'Keep this structure consistent for the deployment pipeline subsection.',
-    },
-    {
-      id: 4,
-      type: 'low',
-      section: 'References & Bibliography',
-      title: 'Missing Publication Years',
-      desc: 'Reference #7 (Vue.js official documentation) and Reference #11 need publication/access dates.',
-      suggestion: 'Add "(Accessed: April 2025)" to online citations.',
-    },
-  ]
+        const response = await api.get("/students/me")
+
+        setUser(response.data)
+      } catch (error) {
+        console.error('FETCH STUDENT ERROR:', error)
+
+        if (error.response?.status === 401) {
+          localStorage.removeItem('token')
+          localStorage.removeItem('user')
+          navigate('/login')
+          return
+        }
+      } finally {
+        setLoadingUser(false)
+      }
+    }
+
+    fetchStudentProfile()
+  }, [navigate])
+
+  const [messages, setMessages] = useState([])
+  const [reports, setReports] = useState([])
+  const [selectedReport, setSelectedReport] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   const handleCopy = (id, text) => {
     navigator.clipboard.writeText(text)
@@ -114,28 +95,37 @@ export default function AIFeedback() {
     }
 
     setMessages((prev) => [...prev, userMsg])
-    const prompt = chatInput
     setChatInput('')
-
-    setTimeout(() => {
-      let reply = "I've reviewed that part. Make sure to clearly state your testing methodology and substantiate your findings with concrete numbers."
-      if (prompt.toLowerCase().includes('conclusion') || prompt.toLowerCase().includes('defense')) {
-        reply = "For your defense, summarize the 3 main engineering challenges you overcame: real-time latency, state synchronization, and user authorization."
-      } else if (prompt.toLowerCase().includes('score') || prompt.toLowerCase().includes('improve')) {
-        reply = "To raise your score to 9.2+, focus on adding quantitative benchmarks in Section 4.2 and fixing the two online citation dates."
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          sender: 'ai',
-          text: reply,
-          time: new Intl.DateTimeFormat('en', { hour: 'numeric', minute: 'numeric' }).format(new Date()),
-        },
-      ])
-    }, 600)
   }
+
+  useEffect(() => {
+    const fetchReports = async () => {
+      try {
+        const token = localStorage.getItem('token')
+        if (!token) {
+          navigate('/login')
+          return
+        }
+
+        setLoading(true)
+        const response = await api.get('/students/my-reports')
+        const reports = response.data.reports || []
+        setReports(reports)
+
+        const withAnalysis = reports.find((r) => r.aiAnalysis || r.aiScore != null)
+        if (withAnalysis) {
+          setSelectedReport(withAnalysis)
+        }
+      } catch (err) {
+        console.error('Fetch reports error:', err)
+        setError('Unable to load your reports.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchReports()
+  }, [])
 
   return (
     <div className="dashboard-wrapper">
@@ -151,22 +141,14 @@ export default function AIFeedback() {
               {isSidebarOpen ? <X size={24} /> : <Menu size={24} />}
             </button>
             <div className="program-info">
-              <BarChart3 size={16} />
-              <span>{user.program}</span>
+              <span>{user?.student?.class}</span>
               <span className="separator">•</span>
-              <span>{user.department}</span>
+              <span>{user?.student?.matricule}</span>
             </div>
           </div>
 
           <div className="header-right">
-            <div className="notification-center">
-              <button className="notification-btn cursor-pointer" onClick={() => navigate('/my-reports')}>
-                <Bell size={20} />
-                {user.notifications > 0 && <span className="notification-badge">{user.notifications}</span>}
-              </button>
-            </div>
-
-            <div className="header-divider"></div>
+            <ThemeToggle />
 
             <div className="relative">
               <div
@@ -174,26 +156,35 @@ export default function AIFeedback() {
                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
               >
                 <div className="user-avatar">
-                  <div className="avatar-placeholder">{user.name[0]}</div>
+                  <div className="avatar-placeholder">{user?.student?.name?.charAt(0)}</div>
                 </div>
                 <div className="user-info">
-                  <div className="user-name">{user.name}</div>
-                  <div className="user-role">{user.role}</div>
+                  <div className="user-name">{user?.student?.name}</div>
+                  <div className="user-role">{user?.student?.role}</div>
                 </div>
                 <ChevronDown size={16} />
               </div>
 
               {isUserMenuOpen && (
-                <div className="absolute right-0 mt-2 w-48 rounded-xl border border-white/10 bg-[#0d1419] p-2 shadow-2xl z-50 text-white text-xs">
+                <div className="absolute right-0 mt-2 w-48 rounded-xl border p-2 shadow-2xl z-50 text-xs" style={{
+                  backgroundColor: 'var(--bg-panel)',
+                  borderColor: 'var(--line)',
+                  color: 'var(--text)'
+                }}>
                   <button
-                    onClick={() => navigate('/student')}
+                    onClick={() => {
+                      setShowProfileOverview(true)
+                      setIsUserMenuOpen(false)
+                    }}
                     className="w-full flex items-center gap-2 p-2 rounded hover:bg-white/10 text-left cursor-pointer"
+                    style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}
                   >
-                    <User size={14} /> Student Dashboard
+                    <User size={14} /> Profile Overview
                   </button>
                   <button
                     onClick={() => navigate('/login')}
-                    className="w-full flex items-center gap-2 p-2 rounded hover:bg-red-500/20 text-red-300 text-left cursor-pointer mt-1"
+                    className="w-full flex items-center gap-2 p-2 rounded text-left cursor-pointer mt-1"
+                    style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}
                   >
                     <LogOut size={14} /> Sign out
                   </button>
@@ -205,29 +196,58 @@ export default function AIFeedback() {
 
         {/* AI Feedback Content */}
         <main className="dashboard-content">
-          {/* Header Banner */}
+          {loading ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-orange-500 border-t-transparent" />
+            </div>
+          ) : error ? (
+            <div className="rounded-2xl border p-8 text-center" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--bg-panel)' }}>
+              <AlertTriangle size={24} style={{ color: '#ef4444' }} />
+              <p className="text-sm mt-2" style={{ color: '#ef4444' }}>{error}</p>
+              <button
+                onClick={() => window.location.reload()}
+                className="mt-3 rounded-lg bg-[#F5A623] px-4 py-2 text-white text-sm"
+              >
+                Try Again
+              </button>
+            </div>
+          ) : !selectedReport ? (
+            <div className="rounded-2xl border p-8 text-center" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--bg-panel)' }}>
+              <Brain size={32} style={{ color: 'var(--text-muted)' }} />
+              <h3 className="text-lg font-bold mt-3" style={{ color: 'var(--text)' }}>No AI analysis available</h3>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Submit a report to receive AI feedback and insights.</p>
+            </div>
+          ) : (
+            <>
+              {/* Header Banner */}
           <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-orange-400 font-semibold mb-1">
+              <div className="flex items-center gap-2 text-xs uppercase tracking-widest font-semibold mb-1" style={{ color: 'var(--orange-3)' }}>
                 <Brain size={16} />
                 <span>AI Automated Report Analysis</span>
               </div>
-              <h1 className="text-3xl font-bold text-white tracking-tight">AI Feedback & Insights</h1>
-              <p className="text-white/60 text-sm mt-1">
-                Report: <span className="text-white font-medium">AI-Powered Internship Platform (Version 3)</span>
+              <h1 className="text-3xl font-bold tracking-tight" style={{ color: 'var(--text)' }}>AI Feedback & Insights</h1>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+                Report: <span className="font-medium" style={{ color: 'var(--text-soft)' }}>{selectedReport ? selectedReport.title : 'No report selected'}</span>
               </p>
             </div>
 
             <div className="flex items-center gap-3">
               <button
                 onClick={() => navigate('/my-reports')}
-                className="px-4 py-2.5 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-white text-xs font-medium transition cursor-pointer flex items-center gap-2"
+                className="px-4 py-2.5 rounded-full border text-xs font-medium transition cursor-pointer flex items-center gap-2"
+                style={{
+                  borderColor: 'var(--line)',
+                  backgroundColor: 'var(--bg-panel)',
+                  color: 'var(--text-soft)'
+                }}
               >
                 <FileText size={14} /> View All Reports
               </button>
               <button
                 onClick={() => navigate('/my-reports')}
-                className="px-4 py-2.5 rounded-full bg-gradient-to-r from-[#ff7a00] to-[#ff9d3d] text-white text-xs font-semibold shadow-lg hover:opacity-90 transition cursor-pointer flex items-center gap-2"
+                className="px-4 py-2.5 rounded-full text-white text-xs font-semibold shadow-lg hover:opacity-90 transition cursor-pointer flex items-center gap-2"
+                style={{ background: 'linear-gradient(135deg, var(--orange), var(--orange-3))' }}
               >
                 Upload Revision <ArrowRight size={14} />
               </button>
@@ -237,36 +257,46 @@ export default function AIFeedback() {
           {/* Top Score Banner */}
           <div className="grid gap-6 md:grid-cols-3 mb-8">
             <div className="card md:col-span-1 flex flex-col items-center justify-center p-6 text-center">
-              <AnimatedProgressRing percentage={84} size={120} strokeWidth={10} />
-              <h3 className="text-lg font-bold text-white mt-4">Writing Quality Score</h3>
-              <p className="text-xs text-white/50 mt-1 max-w-[200px]">
-                Grade: <strong className="text-emerald-400 font-semibold">Very Good (A-)</strong>. Ready for supervisor sign-off after minor tweaks.
+              <AnimatedProgressRing percentage={selectedReport && selectedReport.aiScore != null ? Math.round((selectedReport.aiScore / 10) * 100) : 0} size={120} strokeWidth={10} />
+              <h3 className="text-lg font-bold mt-4" style={{ color: 'var(--text)' }}>Writing Quality Score</h3>
+              <p className="text-xs mt-1 max-w-[200px]" style={{ color: 'var(--text-muted)' }}>
+                {selectedReport && selectedReport.aiScore != null ? (
+                  <>Grade: <strong className="font-semibold" style={{ color: '#10b981' }}>{selectedReport.aiScore}/10</strong></>
+                ) : (
+                  'No AI analysis available yet.'
+                )}
               </p>
             </div>
 
             <div className="card md:col-span-2 p-6 flex flex-col justify-between">
               <div>
-                <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
-                  <TrendingUp size={18} className="text-orange-400" />
+                <h3 className="text-base font-bold mb-4 flex items-center gap-2" style={{ color: 'var(--text)' }}>
+                  <TrendingUp size={18} style={{ color: 'var(--orange-3)' }} />
                   Key Category Performance
                 </h3>
-                <div className="space-y-3">
-                  {metrics.map((m) => (
-                    <div key={m.name} className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span className="text-white font-medium">{m.name}</span>
-                        <span className="text-orange-300 font-bold">{m.score}%</span>
+                {selectedReport && selectedReport.aiAnalysis && selectedReport.aiAnalysis.metrics ? (
+                  <div className="space-y-3">
+                    {Object.entries(selectedReport.aiAnalysis.metrics).map(([name, score]) => (
+                      <div key={name} className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="font-medium" style={{ color: 'var(--text-soft)' }}>{name.charAt(0).toUpperCase() + name.slice(1)}</span>
+                          <span className="font-bold" style={{ color: 'var(--orange-3)' }}>{score}%</span>
+                        </div>
+                        <div className="h-2 w-full rounded-full overflow-hidden" style={{ backgroundColor: 'var(--line)' }}>
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${score}%`,
+                              background: 'linear-gradient(90deg, var(--orange), var(--orange-3))'
+                            }}
+                          ></div>
+                        </div>
                       </div>
-                      <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-[#ff7a00] to-[#ff9d3d] rounded-full"
-                          style={{ width: `${m.score}%` }}
-                        ></div>
-                      </div>
-                      <p className="text-[10px] text-white/40">{m.desc}</p>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No category performance data available yet.</p>
+                )}
               </div>
             </div>
           </div>
@@ -276,103 +306,150 @@ export default function AIFeedback() {
             {/* Left: AI Suggestions List */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Lightbulb size={18} className="text-amber-400" />
-                  Actionable Recommendations ({suggestions.length})
+                <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--text)' }}>
+                  <Lightbulb size={18} style={{ color: '#f59e0b' }} />
+                  Actionable Recommendations
                 </h2>
               </div>
 
-              {suggestions.map((s) => (
-                <div
-                  key={s.id}
-                  className="rounded-2xl border border-white/8 bg-[#0c1218] p-5 transition hover:border-orange-400/30 shadow-sm"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-orange-400">
-                        {s.section}
-                      </span>
-                      <h4 className="text-sm font-bold text-white mt-1">{s.title}</h4>
+              {selectedReport && selectedReport.aiAnalysis && selectedReport.aiAnalysis.suggestions ? (
+                selectedReport.aiAnalysis.suggestions.map((s) => (
+                  <div
+                    key={s.id || s.title}
+                    className="rounded-2xl border p-5 transition hover:border-orange-400/30 shadow-sm"
+                    style={{
+                      borderColor: 'var(--line)',
+                      backgroundColor: 'var(--surface)'
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        {s.section && (
+                          <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--orange-3)' }}>
+                            {s.section}
+                          </span>
+                        )}
+                        <h4 className="text-sm font-bold mt-1" style={{ color: 'var(--text)' }}>{s.title || s.heading || 'Recommendation'}</h4>
+                      </div>
+
+                      {s.type && (
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${
+                            s.type === 'high'
+                              ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                              : s.type === 'medium'
+                              ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                              : s.type === 'positive'
+                              ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                              : 'bg-white/10 text-white/60'
+                          }`}
+                        >
+                          {s.type}
+                        </span>
+                      )}
                     </div>
 
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider ${
-                        s.type === 'high'
-                          ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
-                          : s.type === 'medium'
-                          ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                          : s.type === 'positive'
-                          ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                          : 'bg-white/10 text-white/60'
-                      }`}
-                    >
-                      {s.type}
-                    </span>
-                  </div>
+                    {s.desc && <p className="text-xs mt-2 leading-relaxed" style={{ color: 'var(--text-soft)' }}>{s.desc}</p>}
 
-                  <p className="text-xs text-white/70 mt-2 leading-relaxed">{s.desc}</p>
-
-                  <div className="mt-3 rounded-xl border border-orange-400/20 bg-orange-500/5 p-3 text-xs text-orange-200">
-                    <div className="flex items-center justify-between text-[10px] text-orange-300 font-semibold mb-1">
-                      <span className="flex items-center gap-1">
-                        <CornerDownRight size={12} /> AI Proposed Fix
-                      </span>
-                      <button
-                        onClick={() => handleCopy(s.id, s.suggestion)}
-                        className="hover:text-white flex items-center gap-1 transition cursor-pointer"
-                      >
-                        <Copy size={12} />
-                        {copiedId === s.id ? 'Copied!' : 'Copy'}
-                      </button>
-                    </div>
-                    <p className="font-mono text-[11px] text-white/90">{s.suggestion}</p>
+                    {s.suggestion && (
+                      <div className="mt-3 rounded-xl border p-3 text-xs" style={{
+                        borderColor: 'rgba(255, 122, 0, 0.2)',
+                        backgroundColor: 'rgba(255, 122, 0, 0.05)',
+                        color: 'var(--text-soft)'
+                      }}>
+                        <div className="flex items-center justify-between text-[10px] font-semibold mb-1" style={{ color: 'var(--orange-3)' }}>
+                          <span className="flex items-center gap-1">
+                            <CornerDownRight size={12} /> AI Proposed Fix
+                          </span>
+                          <button
+                            onClick={() => handleCopy(s.id || s.title, s.suggestion)}
+                            className="hover:opacity-80 flex items-center gap-1 transition cursor-pointer"
+                            style={{ color: 'var(--text-soft)' }}
+                          >
+                            <Copy size={12} />
+                            {copiedId === (s.id || s.title) ? 'Copied!' : 'Copy'}
+                          </button>
+                        </div>
+                        <p className="font-mono text-[11px]" style={{ color: 'var(--text)' }}>{s.suggestion}</p>
+                      </div>
+                    )}
                   </div>
+                ))
+              ) : (
+                <div className="rounded-2xl border p-6 text-center" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--bg-panel)' }}>
+                  <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No AI suggestions available yet.</p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Submit a report to receive AI feedback.</p>
                 </div>
-              ))}
+              )}
             </div>
 
             {/* Right: AI Assistant Chat */}
-            <div className="rounded-2xl border border-white/10 bg-[#090e13] p-5 flex flex-col h-[580px] shadow-xl">
-              <div className="flex items-center gap-3 border-b border-white/10 pb-3 mb-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500/20 text-orange-300 border border-orange-400/30">
+            <div className="rounded-2xl border p-5 flex flex-col h-[580px] shadow-xl" style={{
+              borderColor: 'var(--line)',
+              backgroundColor: 'var(--surface)'
+            }}>
+              <div className="flex items-center gap-3 border-b pb-3 mb-3" style={{ borderColor: 'var(--line)' }}>
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl border" style={{
+                  backgroundColor: 'rgba(255, 122, 0, 0.1)',
+                  borderColor: 'rgba(255, 122, 0, 0.25)',
+                  color: 'var(--orange-3)'
+                }}>
                   <Brain size={18} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">AI Writing Assistant</h3>
-                  <p className="text-[10px] text-emerald-400 flex items-center gap-1">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span> Online & contextualized to Report v3
+                  <h3 className="text-sm font-bold" style={{ color: 'var(--text)' }}>AI Writing Assistant</h3>
+                  <p className="text-[10px] flex items-center gap-1" style={{ color: '#10b981' }}>
+                    <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ backgroundColor: '#10b981' }}></span> Online
                   </p>
                 </div>
               </div>
 
               {/* Chat Messages */}
               <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs">
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}
-                  >
+                {messages.length === 0 ? (
+                  <p className="text-center text-xs py-8" style={{ color: 'var(--text-muted)' }}>
+                    No messages yet. Ask a question about your report.
+                  </p>
+                ) : (
+                  messages.map((msg) => (
                     <div
-                      className={`max-w-[85%] rounded-2xl p-3 leading-relaxed ${
-                        msg.sender === 'user'
-                          ? 'bg-gradient-to-r from-[#ff7a00] to-[#ff9d3d] text-white rounded-br-none'
-                          : 'bg-white/8 text-white/90 border border-white/8 rounded-bl-none'
-                      }`}
+                      key={msg.id}
+                      className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}
                     >
-                      {msg.text}
+                      <div
+                        className={`max-w-[85%] rounded-2xl p-3 leading-relaxed ${
+                          msg.sender === 'user'
+                            ? 'text-white rounded-br-none'
+                            : 'border rounded-bl-none'
+                        }`}
+                        style={{
+                          background: msg.sender === 'user'
+                            ? 'linear-gradient(135deg, var(--orange), var(--orange-3))'
+                            : 'var(--bg-panel)',
+                          borderColor: msg.sender === 'user' ? 'transparent' : 'var(--line)',
+                          color: msg.sender === 'user' ? 'white' : 'var(--text-soft)'
+                        }}
+                      >
+                        {msg.text}
+                      </div>
+                      <span className="text-[9px] mt-1 px-1" style={{ color: 'var(--text-muted)' }}>{msg.time}</span>
                     </div>
-                    <span className="text-[9px] text-white/30 mt-1 px-1">{msg.time}</span>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
 
               {/* Quick Prompts */}
-              <div className="pt-3 border-t border-white/8 flex flex-wrap gap-1.5 mb-2">
+              <div className="pt-3 border-t flex flex-wrap gap-1.5 mb-2" style={{ borderColor: 'var(--line)' }}>
                 {['Explain suggestion #1', 'How to prepare for defense?', 'Summarize key strengths'].map((quick) => (
                   <button
                     key={quick}
                     onClick={() => setChatInput(quick)}
-                    className="text-[10px] px-2.5 py-1 rounded-full bg-white/5 hover:bg-white/10 text-white/70 border border-white/10 transition cursor-pointer"
+                    className="text-[10px] px-2.5 py-1 rounded-full border transition cursor-pointer"
+                    style={{
+                      borderColor: 'var(--line)',
+                      backgroundColor: 'var(--bg-panel)',
+                      color: 'var(--text-soft)'
+                    }}
                   >
                     {quick}
                   </button>
@@ -385,20 +462,90 @@ export default function AIFeedback() {
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   placeholder="Ask AI anything about your report..."
-                  className="flex-1 rounded-xl border border-white/10 bg-[#06090c] px-3.5 py-2.5 text-xs text-white placeholder:text-white/30 focus:border-orange-400 focus:outline-none"
+                  className="flex-1 rounded-xl border px-3.5 py-2.5 text-xs focus:outline-none"
+                  style={{
+                    borderColor: 'var(--line)',
+                    backgroundColor: 'var(--bg)',
+                    color: 'var(--text)'
+                  }}
                 />
                 <button
                   type="submit"
                   disabled={!chatInput.trim()}
-                  className="rounded-xl bg-orange-500 px-3.5 py-2.5 text-white hover:bg-orange-600 disabled:opacity-40 transition cursor-pointer flex items-center justify-center shadow-lg shadow-orange-500/20"
+                  className="rounded-xl px-3.5 py-2.5 text-white hover:opacity-90 disabled:opacity-40 transition cursor-pointer flex items-center justify-center shadow-lg"
+                  style={{ backgroundColor: 'var(--orange)' }}
                 >
                   <Send size={14} />
                 </button>
               </form>
             </div>
           </div>
-        </main>
+        </>
+      )}
+    </main>
       </div>
+
+      {/* Profile Overview Modal */}
+      {showProfileOverview && (
+        <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 pt-24">
+          <div className="rounded-2xl border p-8 shadow-[0_20px_50px_rgba(0,0,0,0.06)] w-full max-w-md" style={{
+            backgroundColor: 'var(--bg-panel)',
+            borderColor: 'var(--line)',
+            color: 'var(--text)'
+          }}>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">Profile Overview</h2>
+              <button
+                onClick={() => setShowProfileOverview(false)}
+                className="transition"
+                style={{ color: 'var(--text-muted)' }}
+                onMouseEnter={(e) => e.target.style.color = 'var(--text)'}
+                onMouseLeave={(e) => e.target.style.color = 'var(--text-muted)'}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Name</p>
+                <p className="text-base font-semibold">{user?.student?.name}</p>
+              </div>
+              <div>
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Email</p>
+                <p className="text-base font-semibold">{user?.student?.email}</p>
+              </div>
+              <div>
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Matricule</p>
+                <p className="text-base font-semibold">{user?.student?.matricule}</p>
+              </div>
+              <div>
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Class</p>
+                <p className="text-base font-semibold">{user?.student?.class}</p>
+              </div>
+              {user?.internship && (
+                <>
+                  <div>
+                    <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Company</p>
+                    <p className="text-base font-semibold">{user.internship.company}</p>
+                  </div>
+                   <div>
+                     <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Academic Supervisor</p>
+                     <p className="text-base font-semibold">
+                       {user.internship.academicSupervisor?.name || 'Not assigned'}
+                     </p>
+                   </div>
+                   <div>
+                     <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Professional Supervisor</p>
+                     <p className="text-base font-semibold">
+                       {user.internship.professionalSupervisor?.name || 'Not assigned'}
+                     </p>
+                   </div>
+                </>
+               )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
