@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   AlertCircle,
@@ -10,9 +10,11 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import logoImg from "../assets/images/logo.png";
+import { useAuth } from "../context/AuthContext";
 
 const Login = () => {
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   // =========================
   // FORM STATE
@@ -26,9 +28,12 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState("");
+  const initializedRef = useRef(false);
 
   // Clear form on mount
   useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
     setValues({
       email: "",
       password: "",
@@ -139,14 +144,7 @@ const Login = () => {
         data.requiresPasswordChange
       );
 
-      // Save JWT
-      localStorage.setItem("token", data.token);
-
-      // Save basic user information
-      localStorage.setItem(
-        "user",
-        JSON.stringify(data.user)
-      );
+      login(data.user, data.token);
 
       // =========================
       // FIRST LOGIN

@@ -27,11 +27,13 @@ import {
   Upload,
   UserRound,
   X,
+  Trash2,
   Menu,
   Bell,
   BarChart3,
   LogOut,
   User,
+  PenLine,
 } from 'lucide-react'
 
 const REPORT_ENDPOINTS = ['http://localhost:3000/api/students/my-reports']
@@ -294,15 +296,17 @@ const ReportStatistics = ({ reports }) => {
   )
 }
 
-const ReportCard = ({ report, isSelected, onSelect }) => (
-  <motion.button
-    type="button"
-    onClick={() => onSelect(report)}
+const ReportCard = ({ report, isSelected, onSelect, onOpenWorkspace, onDelete }) => (
+  <motion.div
+    role="button"
+    tabIndex={0}
+    onClick={() => onSelect(report.id ?? report)}
+    onKeyDown={(e) => e.key === 'Enter' && onSelect(report.id ?? report)}
     initial={{ opacity: 0, y: 18 }}
     animate={{ opacity: 1, y: 0 }}
     whileHover={{ y: -2, scale: 1.01 }}
     transition={{ duration: 0.2, ease: 'easeOut' }}
-    className={`group w-full rounded-2xl border p-4 text-left transition-all`}
+    className={`group w-full rounded-2xl border p-4 text-left transition-all cursor-pointer`}
     style={{
       backgroundColor: isSelected ? 'var(--bg-panel)' : 'var(--bg-panel)',
       borderColor: isSelected ? 'rgba(255, 122, 0, 0.6)' : 'var(--line)',
@@ -336,14 +340,45 @@ const ReportCard = ({ report, isSelected, onSelect }) => (
           />
         </div>
 
-        <div className="mt-4 flex items-center justify-between text-[11px] uppercase tracking-[0.16em]" style={{ color: 'var(--text-muted)' }}>
-          <span>AI Analysis</span>
-          <span>{report.aiScore ? `${report.aiScore}/10` : 'Pending'}</span>
+        <div className="mt-4 flex items-center justify-between">
+          <div className="text-[11px] uppercase tracking-[0.16em]" style={{ color: 'var(--text-muted)' }}>
+            <span>AI Analysis</span>
+            <span className="ml-2">{report.aiScore ? `${report.aiScore}/10` : 'Pending'}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={(event) => { event.stopPropagation(); onDelete?.(report.id); }}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border transition"
+              style={{
+                borderColor: 'rgba(239, 68, 68, 0.35)',
+                color: '#ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)'
+              }}
+              title="Delete report"
+            >
+              <Trash2 size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={(event) => { event.stopPropagation(); onOpenWorkspace?.(report); }}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border transition"
+              style={{
+                borderColor: 'rgba(255, 122, 0, 0.35)',
+                color: 'var(--orange-3)',
+                backgroundColor: 'rgba(255, 122, 0, 0.1)'
+              }}
+              title="Open in writing workspace"
+            >
+              <PenLine size={12} />
+            </button>
+          </div>
         </div>
       </div>
     </div>
-  </motion.button>
+  </motion.div>
 )
+
 
 const ReportFilters = ({ searchQuery, setSearchQuery, statusFilter, setStatusFilter, sortBy, setSortBy }) => (
   <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -409,7 +444,7 @@ const ReportFilters = ({ searchQuery, setSearchQuery, statusFilter, setStatusFil
   </div>
 )
 
-const ReportDetails = ({ report, onSendToSupervisor, onSendToAi, actionLoading }) => {
+const ReportDetails = ({ report, onSendToSupervisor, onSendToAi, actionLoading, onOpenSupervisorModal }) => {
   if (!report) {
     return (
       <div className="flex h-full min-h-[420px] items-center justify-center rounded-[24px] border border-dashed p-8 text-center" style={{
@@ -514,7 +549,7 @@ const ReportDetails = ({ report, onSendToSupervisor, onSendToAi, actionLoading }
           <>
             <button
               type="button"
-              onClick={() => onSendToSupervisor?.(report.id)}
+              onClick={() => onOpenSupervisorModal?.(report.id)}
               disabled={actionLoading}
               className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white shadow-[0_18px_30px_rgba(255,122,0,0.2)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
               style={{
@@ -545,7 +580,7 @@ const ReportDetails = ({ report, onSendToSupervisor, onSendToAi, actionLoading }
         {report.status === 'ai_analysis' && (
           <button
             type="button"
-            onClick={() => onSendToSupervisor?.(report.id)}
+            onClick={() => onOpenSupervisorModal?.(report.id)}
             disabled={actionLoading}
             className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white shadow-[0_18px_30px_rgba(255,122,0,0.2)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
             style={{
@@ -587,6 +622,18 @@ const ReportDetails = ({ report, onSendToSupervisor, onSendToAi, actionLoading }
           <Download className="h-4 w-4" />
           Download
         </button>
+        <a
+          href={`/writing-workspace?reportId=${report.id}`}
+          className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5"
+          style={{
+            borderColor: 'rgba(255, 122, 0, 0.35)',
+            backgroundColor: 'rgba(255, 122, 0, 0.08)',
+            color: 'var(--orange-3)'
+          }}
+        >
+          <PenLine className="h-4 w-4" />
+          Open in Workspace
+        </a>
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
@@ -924,7 +971,7 @@ const UploadReportModal = ({ isOpen, onClose, onUploadSuccess }) => {
               disabled={uploading || !selectedFile}
               className="rounded-full bg-gradient-to-r from-[#ff7a00] via-[#ff8a1c] to-[#ff9d3d] px-4 py-2 text-sm font-medium text-white shadow-[0_18px_30px_rgba(255,122,0,0.2)] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {uploading ? 'Uploading...' : 'Submit Report'}
+              {uploading ? 'Uploading...' : 'Upload Report'}
             </button>
           </div>
         </motion.div>
@@ -994,6 +1041,12 @@ export default function MyReports() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const [supervisorModal, setSupervisorModal] = useState({ open: false, reportId: null, type: 'academic' })
+
+  const openWorkspace = (report) => {
+    if (!report?.id) return
+    navigate(`/writing-workspace?reportId=${report.id}`)
+  }
 
   const handleSignOut = () => {
     localStorage.removeItem('internSmart_user')
@@ -1017,19 +1070,45 @@ export default function MyReports() {
 
   const handleUploadSuccess = (newReport) => {
     if (newReport) {
-      setReports((prev) => [newReport, ...prev])
+      setReports((prev) => {
+        const filtered = prev.filter((r) => r.id !== newReport.id)
+        return [newReport, ...filtered]
+      })
       setSelectedReportId(newReport.id)
+      openWorkspace(newReport)
     } else {
       fetchReports()
     }
   }
 
-  const handleSendToSupervisor = async (id) => {
+  const handleDeleteReport = async (id) => {
+    if (!id) return
+    const confirmed = window.confirm('Are you sure you want to delete this report? This action cannot be undone.')
+    if (!confirmed) return
+
+    try {
+      const token = localStorage.getItem('token')
+      const response = await fetch(`http://localhost:3000/api/students/reports/${id}`, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.message || 'Unable to delete report')
+
+      setReports((prev) => prev.filter((r) => r.id !== id))
+      setSelectedReportId((current) => (current === id ? null : current))
+    } catch (err) {
+      setError(err.message || 'Unable to delete report. Please try again.')
+    }
+  }
+
+  const handleSendToSupervisor = async (id, type = 'academic') => {
     setActionLoading(true)
     setError('')
     try {
       const token = localStorage.getItem('token')
-      const response = await fetch(`http://localhost:3000/api/students/reports/${id}/send-to-supervisor`, {
+      const response = await fetch(`http://localhost:3000/api/students/reports/${id}/send-to-supervisor?type=${type}`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
@@ -1037,6 +1116,7 @@ export default function MyReports() {
       if (!response.ok) throw new Error(data.message || 'Unable to send report to supervisor')
 
       setReports((prev) => prev.map((r) => (r.id === id ? normalizeReport(data.report) : r)))
+      setSupervisorModal({ open: false, reportId: null, type: 'academic' })
     } catch (err) {
       setError(err.message || 'Unable to send report to supervisor. Please try again.')
     } finally {
@@ -1046,7 +1126,7 @@ export default function MyReports() {
 
   const handleSendToAi = async (id) => {
     setActionLoading(true)
-    setError('')
+    setError('Analysing your report with AI… this may take up to 30 seconds.')
     try {
       const token = localStorage.getItem('token')
       const response = await fetch(`http://localhost:3000/api/students/reports/${id}/send-to-ai`, {
@@ -1057,6 +1137,9 @@ export default function MyReports() {
       if (!response.ok) throw new Error(data.message || 'Unable to send report to AI')
 
       setReports((prev) => prev.map((r) => (r.id === id ? normalizeReport(data.report) : r)))
+      setError('')
+      // Navigate to the AI analysis page so the student sees results immediately
+      navigate('/ai-analysis')
     } catch (err) {
       setError(err.message || 'Unable to send report to AI. Please try again.')
     } finally {
@@ -1234,6 +1317,8 @@ export default function MyReports() {
                         report={report}
                         isSelected={selectedReport?.id === report.id}
                         onSelect={setSelectedReportId}
+                        onOpenWorkspace={openWorkspace}
+                        onDelete={handleDeleteReport}
                       />
                     ))}
                   </div>
@@ -1243,6 +1328,7 @@ export default function MyReports() {
                     onSendToSupervisor={handleSendToSupervisor}
                     onSendToAi={handleSendToAi}
                     actionLoading={actionLoading}
+                    onOpenSupervisorModal={(id) => setSupervisorModal({ open: true, reportId: id, type: 'academic' })}
                   />
                 </div>
               )}
@@ -1318,6 +1404,101 @@ export default function MyReports() {
           </div>
         </div>
       )}
+      
+      <AnimatePresence>
+        {supervisorModal.open && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ y: 18, opacity: 0, scale: 0.98 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 12, opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="w-full max-w-md rounded-[28px] border p-6 shadow-[0_40px_100px_rgba(0,0,0,0.45)]"
+              style={{
+                backgroundColor: 'var(--bg-panel)',
+                borderColor: 'var(--line)',
+                color: 'var(--text)'
+              }}
+            >
+              <div className="mb-4">
+                <p className="text-[11px] uppercase tracking-[0.2em]" style={{ color: 'var(--orange-3)' }}>Send to Supervisor</p>
+                <h3 className="mt-2 text-xl font-semibold">Choose supervisor type</h3>
+                <p className="mt-2 text-sm" style={{ color: 'var(--text-soft)' }}>
+                  Select which supervisor should review this report.
+                </p>
+              </div>
+
+              <div className="mt-6 grid gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleSendToSupervisor(supervisorModal.reportId, 'academic')}
+                  disabled={actionLoading}
+                  className="flex items-center gap-3 rounded-2xl border p-4 text-left transition hover:border-[#ff7a00]"
+                  style={{
+                    borderColor: 'var(--line)',
+                    backgroundColor: 'var(--bg-panel)'
+                  }}
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl border" style={{
+                    borderColor: 'rgba(255, 122, 0, 0.25)',
+                    backgroundColor: 'rgba(255, 122, 0, 0.1)',
+                    color: 'var(--orange-3)'
+                  }}>
+                    <UserRound className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold">Academic Supervisor</div>
+                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Send to your academic supervisor for review</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSendToSupervisor(supervisorModal.reportId, 'professional')}
+                  disabled={actionLoading}
+                  className="flex items-center gap-3 rounded-2xl border p-4 text-left transition hover:border-[#ff7a00]"
+                  style={{
+                    borderColor: 'var(--line)',
+                    backgroundColor: 'var(--bg-panel)'
+                  }}
+                >
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl border" style={{
+                    borderColor: 'rgba(16, 185, 129, 0.25)',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    color: '#10b981'
+                  }}>
+                    <UserRound className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold">Professional Supervisor</div>
+                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Send to your professional supervisor for review</div>
+                  </div>
+                </button>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSupervisorModal({ open: false, reportId: null, type: 'academic' })}
+                  className="rounded-full border px-4 py-2 text-sm"
+                  style={{
+                    borderColor: 'var(--line)',
+                    backgroundColor: 'var(--bg-panel)',
+                    color: 'var(--text-soft)'
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

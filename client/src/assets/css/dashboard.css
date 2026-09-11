@@ -240,8 +240,8 @@
 }
 
 .greeting-title {
-  font-family: 'Playfair Display', serif;
-  font-size: 42px;
+  font-family: 'Playfair Display',;
+  font-size: 40px;
   font-weight: 700;
   color: var(--text);
   margin: 0 0 8px 0;

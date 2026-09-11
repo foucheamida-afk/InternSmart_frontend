@@ -991,7 +991,7 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  color: rgba(44, 39, 39, 0.8);
+  color: rgb(117, 115, 115);
   font-size: 0.95rem;
 }
 

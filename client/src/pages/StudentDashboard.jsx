@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from "../api/axios"
 
@@ -11,14 +11,6 @@ import {
   ChevronDown,
   Upload,
   Star,
-  CheckCircle2,
-  Circle,
-  Clock,
-  MapPin,
-  Video,
-  Zap,
-  Brain,
-  ArrowRight,
   Menu,
   X,
   LogOut,
@@ -28,7 +20,6 @@ import '../assets/css/dashboard.css'
 import '../assets/css/dashboard-components.css'
 import Sidebar from '../components/Sidebar'
 import { StatsSkeleton } from '../components/dashboard/SkeletonLoader'
-import AnimatedProgressRing from '../components/dashboard/AnimatedProgressRing'
 import StatisticsCard from '../components/dashboard/StatisticsCard'
 import CurrentReportCard from '../components/dashboard/CurrentReportCard'
 import InternshipTimeline from '../components/dashboard/InternshipTimeline'
@@ -38,6 +29,8 @@ import AIAnalysisOverview from '../components/dashboard/AIAnalysisOverview'
 import AIAssistantCard from '../components/dashboard/AIAssistantCard'
 import FinalGradeCard from '../components/dashboard/FinalGradeCard'
 import ThemeToggle from '../components/ThemeToggle'
+import { useAuth } from '../context/AuthContext'
+import ReportAIReview from "../components/ai/ReportAIReview";
 
 
 
@@ -66,6 +59,7 @@ const normalizeStudentProfile = (payload = {}) => {
 
 export default function StudentDashboard() {
   const navigate = useNavigate()
+  const { logout } = useAuth()
   const [user, setUser] = useState(null)
   const [loadingUser, setLoadingUser] = useState(true)
   const [userError, setUserError] = useState("")
@@ -81,12 +75,6 @@ export default function StudentDashboard() {
 
   useEffect(() => {
     const fetchDashboardData = async () => {
-      const token = localStorage.getItem("token")
-      if (!token) {
-        navigate("/login")
-        return
-      }
-
       const [statsResult, notificationsResult] = await Promise.allSettled([
         api.get("/students/dashboard-stats"),
         api.get("/students/my-notifications"),
@@ -118,7 +106,7 @@ export default function StudentDashboard() {
       const refreshInterval = window.setInterval(fetchDashboardData, 15000)
       return () => window.clearInterval(refreshInterval)
     }
-  }, [user, navigate])
+  }, [user])
 
   const handleMarkNotificationRead = async (id) => {
     try {
@@ -134,21 +122,13 @@ export default function StudentDashboard() {
   useEffect(() => {
     const fetchStudentProfile = async () => {
       try {
-        const token = localStorage.getItem("token")
-        if (!token) {
-          navigate("/login")
-          return
-        }
-
         const response = await api.get("/students/me")
         setUser(normalizeStudentProfile(response.data))
       } catch (error) {
         console.error("FETCH STUDENT ERROR:", error)
 
         if (error.response?.status === 401) {
-          localStorage.removeItem("token")
-          localStorage.removeItem("user")
-          navigate("/login")
+          logout()
           return
         }
 
@@ -163,11 +143,10 @@ export default function StudentDashboard() {
     }
 
     fetchStudentProfile()
-  }, [navigate])
+  }, [logout, navigate])
 
   const handleSignOut = () => {
-    localStorage.removeItem("user")
-    localStorage.removeItem("token")
+    logout()
     navigate("/login")
   }
 
@@ -324,10 +303,16 @@ if (userError || !user) {
               <p className="greeting-subtitle">Here's what's happening with your internship today.</p>
             </div>
 
-            <button className="upload-btn cursor-pointer" onClick={() => navigate('/my-reports', { state: { openUpload: true } })}>
-              <Upload size={18} />
-              Submit Report
-            </button>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button className="upload-btn cursor-pointer" style={{ background: 'var(--bg-panel)', border: '1px solid var(--line)', color: 'var(--text)' }} onClick={() => navigate('/writing-workspace')}>
+                <FileText size={18} />
+                Write Report
+              </button>
+              <button className="upload-btn cursor-pointer" onClick={() => navigate('/my-reports', { state: { openUpload: true } })}>
+                <Upload size={18} />
+                Upload Report
+              </button>
+            </div>
           </section>
 
           {/* Statistics Row */}
@@ -378,7 +363,7 @@ if (userError || !user) {
                   change="Total meetings"
                   icon={Calendar}
                   type="default"
-                  onClick={() => navigate('/my-reports')}
+                  onClick={() => navigate('/my-reports', { state: { activeTab: 'meetings' } })}
                 />
               </>
             )}
@@ -410,9 +395,12 @@ if (userError || !user) {
           {/* Bottom Grid Section */}
           <section className="bottom-grid">
             <AIAnalysisOverview />
-            <AIAssistantCard />
+            {/* <AIAssistantCard /> */}
             <FinalGradeCard />
           </section>
+
+          {/* AI Report Reviewer */}
+          {/* <ReportAIReview /> */}
         </main>
       </div>
 

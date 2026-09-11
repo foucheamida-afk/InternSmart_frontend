@@ -25,12 +25,15 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+
+    if (status === 401) {
       const isAuthPage = ["/login", "/", "/change-password"].includes(window.location.pathname);
 
       if (!isAuthPage) {
         localStorage.removeItem("token");
         localStorage.removeItem("user");
+        window.dispatchEvent(new Event("auth:logout"));
         window.location.assign("/login");
       }
     }

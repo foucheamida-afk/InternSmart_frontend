@@ -1,22 +1,17 @@
 import { Navigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 
-function ProtectedRoute({ children }) {
-  const token = localStorage.getItem('token')
-  const userStr = localStorage.getItem('user')
-  
-  if (!token || !userStr) {
+function ProtectedRoute({ children, allowedRoles }) {
+  const { user, token } = useAuth()
+
+  if (!token || !user) {
     return <Navigate to="/login" replace />
   }
-  
-  try {
-    const user = JSON.parse(userStr)
-    if (user.role !== 'admin') {
-      return <Navigate to="/" replace />
-    }
-  } catch {
-    return <Navigate to="/login" replace />
+
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    return <Navigate to="/" replace />
   }
-  
+
   return children
 }
 

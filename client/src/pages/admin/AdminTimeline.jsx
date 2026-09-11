@@ -107,7 +107,8 @@ export default function AdminTimeline() {
           className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-white shadow-lg transition cursor-pointer"
           style={{ background: 'linear-gradient(135deg, var(--orange), var(--orange-3))' }}
         >
-          <Plus size={16} /> Add Timeline
+          
+           Add Timeline
         </button>
       </div>
 

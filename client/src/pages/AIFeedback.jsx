@@ -22,6 +22,8 @@ import {
   CornerDownRight,
   ThumbsUp,
   Copy,
+  History,
+  Loader2,
 } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
 import AnimatedProgressRing from '../components/dashboard/AnimatedProgressRing'
@@ -29,6 +31,7 @@ import ThemeToggle from '../components/ThemeToggle'
 import '../assets/css/dashboard.css'
 import '../assets/css/dashboard-components.css'
 import api from "../api/axios";
+import { askWritingAssistant } from "../services/aiService";
 
 export default function AIFeedback() {
   const navigate = useNavigate()
@@ -37,6 +40,11 @@ export default function AIFeedback() {
   const [activeTab, setActiveTab] = useState('suggestions')
   const [copiedId, setCopiedId] = useState(null)
   const [chatInput, setChatInput] = useState('')
+  const [quota, setQuota] = useState(null)
+  const [isSending, setIsSending] = useState(false)
+  const [showChatHistory, setShowChatHistory] = useState(false)
+  const [chatHistory, setChatHistory] = useState([])
+  const [activeChatId, setActiveChatId] = useState(null)
   const [user, setUser] = useState(null)
   const [loadingUser, setLoadingUser] = useState(true)
   const [showProfileOverview, setShowProfileOverview] = useState(false)
@@ -77,25 +85,104 @@ export default function AIFeedback() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  const chatStorageKey = selectedReport ? `internsmart-ai-chats-${selectedReport.id}` : null
+
+  const saveChatHistory = (nextMessages, existingHistory = chatHistory, currentId = activeChatId) => {
+    if (!chatStorageKey || nextMessages.length === 0) return
+    const now = new Date().toISOString()
+    const chatId = currentId || `${Date.now()}`
+    const existingChat = existingHistory.find((chat) => chat.id === chatId)
+    const nextChat = {
+      id: chatId,
+      createdAt: existingChat?.createdAt || now,
+      updatedAt: now,
+      messages: nextMessages,
+    }
+    const nextHistory = existingHistory.some((chat) => chat.id === chatId)
+      ? existingHistory.map((chat) => chat.id === chatId ? nextChat : chat)
+      : [nextChat, ...existingHistory]
+    setActiveChatId(chatId)
+    setChatHistory(nextHistory)
+    localStorage.setItem(chatStorageKey, JSON.stringify(nextHistory))
+  }
+
+  useEffect(() => {
+    if (!chatStorageKey) return
+    try {
+      const stored = JSON.parse(localStorage.getItem(chatStorageKey) || '[]')
+      const history = Array.isArray(stored) ? stored : []
+      setChatHistory(history)
+      const latest = history[0]
+      setActiveChatId(latest?.id || null)
+      setMessages(latest?.messages || [])
+    } catch {
+      setChatHistory([])
+      setActiveChatId(null)
+      setMessages([])
+    }
+  }, [chatStorageKey])
+
   const handleCopy = (id, text) => {
     navigator.clipboard.writeText(text)
     setCopiedId(id)
     setTimeout(() => setCopiedId(null), 2000)
   }
 
-  const handleSendMessage = (e) => {
+  const handleSendMessage = async (e) => {
     e.preventDefault()
-    if (!chatInput.trim()) return
+    if (!chatInput.trim() || !selectedReport || isSending) return
+
+    const question = chatInput.trim()
+    const chatId = activeChatId || `${Date.now()}`
 
     const userMsg = {
       id: Date.now(),
       sender: 'user',
-      text: chatInput,
+      text: question,
       time: new Intl.DateTimeFormat('en', { hour: 'numeric', minute: 'numeric' }).format(new Date()),
     }
 
-    setMessages((prev) => [...prev, userMsg])
+    const nextMessages = [...messages, userMsg]
+    setMessages(nextMessages)
+    saveChatHistory(nextMessages, chatHistory, chatId)
     setChatInput('')
+    setIsSending(true)
+
+    try {
+      const data = await askWritingAssistant(selectedReport.id, question)
+      setQuota(data.quota)
+      const assistantMessage = {
+        id: Date.now() + 1,
+        sender: 'ai',
+        text: data.answer,
+        time: new Intl.DateTimeFormat('en', { hour: 'numeric', minute: 'numeric' }).format(new Date()),
+      }
+      setMessages((prev) => {
+        const updated = [...prev, assistantMessage]
+        saveChatHistory(updated, chatHistory, chatId)
+        return updated
+      })
+    } catch (err) {
+      const errorMessage = {
+        id: Date.now() + 1,
+        sender: 'ai',
+        text: err.response?.data?.message || 'The assistant could not answer this request.',
+        time: new Intl.DateTimeFormat('en', { hour: 'numeric', minute: 'numeric' }).format(new Date()),
+      }
+      setMessages((prev) => {
+        const updated = [...prev, errorMessage]
+        saveChatHistory(updated, chatHistory, chatId)
+        return updated
+      })
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const openPastChat = (chat) => {
+    setActiveChatId(chat.id)
+    setMessages(chat.messages || [])
+    setShowChatHistory(false)
   }
 
   useEffect(() => {
@@ -116,6 +203,8 @@ export default function AIFeedback() {
         if (withAnalysis) {
           setSelectedReport(withAnalysis)
         }
+        const quotaResponse = await api.get('/ai/writing-assistant/quota')
+        setQuota(quotaResponse.data)
       } catch (err) {
         console.error('Fetch reports error:', err)
         setError('Unable to load your reports.')
@@ -259,7 +348,7 @@ export default function AIFeedback() {
             <div className="card md:col-span-1 flex flex-col items-center justify-center p-6 text-center">
               <AnimatedProgressRing percentage={selectedReport && selectedReport.aiScore != null ? Math.round((selectedReport.aiScore / 10) * 100) : 0} size={120} strokeWidth={10} />
               <h3 className="text-lg font-bold mt-4" style={{ color: 'var(--text)' }}>Writing Quality Score</h3>
-              <p className="text-xs mt-1 max-w-[200px]" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-xs mt-1 max-w-50" style={{ color: 'var(--text-muted)' }}>
                 {selectedReport && selectedReport.aiScore != null ? (
                   <>Grade: <strong className="font-semibold" style={{ color: '#10b981' }}>{selectedReport.aiScore}/10</strong></>
                 ) : (
@@ -359,7 +448,7 @@ export default function AIFeedback() {
                       }}>
                         <div className="flex items-center justify-between text-[10px] font-semibold mb-1" style={{ color: 'var(--orange-3)' }}>
                           <span className="flex items-center gap-1">
-                            <CornerDownRight size={12} /> AI Proposed Fix
+                            <CornerDownRight size={12} /> Recommendation
                           </span>
                           <button
                             onClick={() => handleCopy(s.id || s.title, s.suggestion)}
@@ -384,7 +473,7 @@ export default function AIFeedback() {
             </div>
 
             {/* Right: AI Assistant Chat */}
-            <div className="rounded-2xl border p-5 flex flex-col h-[580px] shadow-xl" style={{
+            <div className="rounded-2xl border p-5 flex flex-col h-145 shadow-xl" style={{
               borderColor: 'var(--line)',
               backgroundColor: 'var(--surface)'
             }}>
@@ -401,8 +490,49 @@ export default function AIFeedback() {
                   <p className="text-[10px] flex items-center gap-1" style={{ color: '#10b981' }}>
                     <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ backgroundColor: '#10b981' }}></span> Online
                   </p>
+                  {quota && <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>{quota.requestsRemaining} of {quota.limit} requests remaining today</p>}
                 </div>
+                <button
+                  type="button"
+                  title="Open chat history"
+                  aria-label="Open chat history"
+                  onClick={() => setShowChatHistory((visible) => !visible)}
+                  className="ml-auto rounded-lg border p-2 transition hover:opacity-80 cursor-pointer"
+                  style={{ borderColor: 'var(--line)', color: 'var(--text-soft)', backgroundColor: 'var(--bg-panel)' }}
+                >
+                  <History size={15} />
+                </button>
               </div>
+
+              {showChatHistory && (
+                <div className="mb-3 rounded-xl border p-3 max-h-44 overflow-y-auto" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--bg-panel)' }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold" style={{ color: 'var(--text)' }}>Past chats</span>
+                    <button type="button" onClick={() => setShowChatHistory(false)} aria-label="Close chat history" className="cursor-pointer" style={{ color: 'var(--text-muted)' }}><X size={14} /></button>
+                  </div>
+                  {chatHistory.length === 0 ? (
+                    <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>No saved chats for this report.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {chatHistory.map((chat) => {
+                        const firstQuestion = chat.messages?.find((message) => message.sender === 'user')?.text || 'Chat conversation'
+                        return (
+                          <button
+                            type="button"
+                            key={chat.id}
+                            onClick={() => openPastChat(chat)}
+                            className="w-full text-left rounded-lg p-2 transition hover:opacity-80 cursor-pointer"
+                            style={{ backgroundColor: chat.id === activeChatId ? 'rgba(255,122,0,0.1)' : 'transparent', color: 'var(--text-soft)' }}
+                          >
+                            <span className="block truncate text-[11px]">{firstQuestion}</span>
+                            <span className="block text-[9px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{new Date(chat.updatedAt).toLocaleString()}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Chat Messages */}
               <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs">
@@ -436,6 +566,12 @@ export default function AIFeedback() {
                     </div>
                   ))
                 )}
+                {isSending && (
+                  <div className="flex items-center gap-2 text-[11px] px-1" style={{ color: 'var(--text-muted)' }} aria-live="polite">
+                    <Loader2 size={14} className="animate-spin" style={{ color: 'var(--orange-3)' }} />
+                    <span>AI is reviewing your report and preparing an answer...</span>
+                  </div>
+                )}
               </div>
 
               {/* Quick Prompts */}
@@ -444,6 +580,7 @@ export default function AIFeedback() {
                   <button
                     key={quick}
                     onClick={() => setChatInput(quick)}
+                    disabled={isSending}
                     className="text-[10px] px-2.5 py-1 rounded-full border transition cursor-pointer"
                     style={{
                       borderColor: 'var(--line)',
@@ -468,14 +605,15 @@ export default function AIFeedback() {
                     backgroundColor: 'var(--bg)',
                     color: 'var(--text)'
                   }}
+                  disabled={isSending}
                 />
                 <button
                   type="submit"
-                  disabled={!chatInput.trim()}
+                  disabled={!chatInput.trim() || isSending || !selectedReport}
                   className="rounded-xl px-3.5 py-2.5 text-white hover:opacity-90 disabled:opacity-40 transition cursor-pointer flex items-center justify-center shadow-lg"
                   style={{ backgroundColor: 'var(--orange)' }}
                 >
-                  <Send size={14} />
+                  {isSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                 </button>
               </form>
             </div>

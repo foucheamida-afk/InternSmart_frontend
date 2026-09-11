@@ -36,6 +36,8 @@ function App() {
         <Route path="/student/dashboard" element={<StudentDashboard />} />
         <Route path="/my-reports" element={<MyReports />} />
         <Route path="/writing-workspace" element={<WritingWorkspace />} />
+        <Route path="/workspace" element={<WritingWorkspace />} />
+        <Route path="/workspace/:id" element={<WritingWorkspace />} />
         <Route path="/ai-analysis" element={<AIFeedback />} />
         <Route path="/ai-analysis/:id" element={<AIFeedback />} />
         <Route path="/ai-feedback" element={<AIFeedback />} />

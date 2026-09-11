@@ -8,6 +8,8 @@ import SupervisorDashboard from "../pages/SupervisorDashboard";
 import AdminDashboard from "../pages/AdminDashboard";
 import ChangePassword from "../pages/ChangePassword";
 import Settings from "../pages/Settings";
+import WritingWorkspace from "../pages/WritingWorkspace";
+import ProtectedRoute from "../components/ProtectedRoute";
 
 const AppRouter = () => {
   return (
@@ -15,16 +17,95 @@ const AppRouter = () => {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/student/dashboard" element={<StudentDashboard />} />
-        <Route path="/my-reports" element={<MyReports />} />
-        <Route path="/ai-analysis" element={<AIFeedback />} />
-        <Route path="/ai-analysis/:id" element={<AIFeedback />} />
-        <Route path="/ai-feedback" element={<AIFeedback />} />
-        <Route path="/supervisor" element={<SupervisorDashboard />} />
-        <Route path="/supervisors" element={<SupervisorDashboard />} />
-        <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/change-password" element={<ChangePassword />} />
-        <Route path="/settings" element={<Settings />} />
+        <Route
+          path="/student/dashboard"
+          element={
+            <ProtectedRoute allowedRoles={["student"]}>
+              <StudentDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/my-reports"
+          element={
+            <ProtectedRoute allowedRoles={["student"]}>
+              <MyReports />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ai-analysis"
+          element={
+            <ProtectedRoute allowedRoles={["student", "academic_supervisor", "professional_supervisor"]}>
+              <AIFeedback />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ai-analysis/:id"
+          element={
+            <ProtectedRoute allowedRoles={["student", "academic_supervisor", "professional_supervisor"]}>
+              <AIFeedback />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ai-feedback"
+          element={
+            <ProtectedRoute allowedRoles={["student", "academic_supervisor", "professional_supervisor"]}>
+              <AIFeedback />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/supervisor"
+          element={
+            <ProtectedRoute allowedRoles={["academic_supervisor"]}>
+              <SupervisorDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/supervisors"
+          element={
+            <ProtectedRoute allowedRoles={["academic_supervisor"]}>
+              <SupervisorDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute allowedRoles={["admin"]}>
+              <AdminDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute allowedRoles={["student", "academic_supervisor", "professional_supervisor", "admin"]}>
+              <Settings />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/workspace"
+          element={
+            <ProtectedRoute allowedRoles={["student", "academic_supervisor", "professional_supervisor"]}>
+              <WritingWorkspace />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/workspace/:id"
+          element={
+            <ProtectedRoute allowedRoles={["student", "academic_supervisor", "professional_supervisor"]}>
+              <WritingWorkspace />
+            </ProtectedRoute>
+          }
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

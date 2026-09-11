@@ -162,6 +162,32 @@ export default function AIAnalysisOverview() {
           ))}
         </div>
       </div>
+
+      {(analysis.suggestions?.some((item) => item.type !== 'positive') || analysis.generalFeedback?.length) && (
+        <div className="mt-4 border-t pt-4" style={{ borderColor: 'var(--line)' }}>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <span className="text-xs font-semibold" style={{ color: 'var(--text)' }}>Corrections to review</span>
+            {analysis.issueCounts && (
+              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                {analysis.issueCounts.high || 0} high · {analysis.issueCounts.medium || 0} medium · {analysis.issueCounts.low || 0} low
+              </span>
+            )}
+          </div>
+          <div className="space-y-3">
+            {(analysis.suggestions || []).filter((item) => item.type !== 'positive').slice(0, 3).map((item) => (
+              <div key={item.id || item.title} className="rounded-lg border p-3" style={{ borderColor: 'var(--line)', backgroundColor: 'var(--bg-panel)' }}>
+                <div className="flex items-start justify-between gap-2">
+                  <strong className="text-xs" style={{ color: 'var(--text)' }}>{item.title || 'Issue'}</strong>
+                  <span className="text-[10px] uppercase font-semibold" style={{ color: item.type === 'high' ? '#ef4444' : item.type === 'medium' ? '#d97706' : 'var(--text-muted)' }}>{item.type || 'review'}</span>
+                </div>
+                {item.location && <p className="text-[10px] mt-1" style={{ color: 'var(--orange-3)' }}>Where: {item.location}</p>}
+                {item.originalText && <p className="text-[11px] mt-1 italic" style={{ color: 'var(--text-muted)' }}>&quot;{item.originalText}&quot;</p>}
+                {item.suggestion && <p className="text-[11px] mt-1 leading-relaxed" style={{ color: 'var(--text-soft)' }}>Do this: {item.suggestion}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

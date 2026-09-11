@@ -247,6 +247,7 @@ export default function AdminUsers() {
                   <th className="pb-3 font-semibold px-4">Email</th>
                   <th className="pb-3 font-semibold px-4">Role</th>
                   <th className="pb-3 font-semibold px-4">Status</th>
+                  <th className="pb-3 font-semibold px-4">Last Login</th>
                   <th className="pb-3 font-semibold px-4">Created</th>
                   <th className="pb-3 font-semibold px-4 text-right">Actions</th>
                 </tr>
@@ -261,12 +262,27 @@ export default function AdminUsers() {
                     <td className="py-3.5 px-4">{getRoleBadge(u.role)}</td>
                     <td className="py-3.5 px-4">
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wider border" style={{
-                        backgroundColor: u.active ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                        color: u.active ? '#6ee7b7' : '#fca5a5',
-                        borderColor: u.active ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'
+                        backgroundColor: u.status === 'online' ? 'rgba(16, 185, 129, 0.1)' :
+                          u.status === 'offline' ? 'rgba(148, 163, 184, 0.1)' :
+                          u.status === 'logged_in' ? 'rgba(59, 130, 246, 0.1)' :
+                          u.status === 'deactivated' ? 'rgba(239, 68, 68, 0.1)' :
+                          'rgba(148, 163, 184, 0.1)',
+                        color: u.status === 'online' ? '#6ee7b7' :
+                          u.status === 'offline' ? '#94a3b8' :
+                          u.status === 'logged_in' ? '#93c5fd' :
+                          u.status === 'deactivated' ? '#fca5a5' :
+                          '#94a3b8',
+                        borderColor: u.status === 'online' ? 'rgba(16, 185, 129, 0.3)' :
+                          u.status === 'offline' ? 'rgba(148, 163, 184, 0.3)' :
+                          u.status === 'logged_in' ? 'rgba(59, 130, 246, 0.3)' :
+                          u.status === 'deactivated' ? 'rgba(239, 68, 68, 0.3)' :
+                          'rgba(148, 163, 184, 0.3)'
                       }}>
-                        {u.active ? 'Active' : 'Inactive'}
+                        {u.status === 'logged_out' ? 'Offline' : u.status.replace('_', ' ')}
                       </span>
+                    </td>
+                    <td className="py-3.5 px-4" style={{ color: 'var(--text-soft)' }}>
+                      {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}
                     </td>
                     <td className="py-3.5 px-4" style={{ color: 'var(--text-soft)' }}>
                       {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}
