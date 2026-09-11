@@ -6,6 +6,13 @@ import Meeting from "../models/meetingModel.js";
 import Notification from "../models/notificationModel.js";
 import Task from "../models/taskModel.js";
 import { Op } from "sequelize";
+import extractPdfText from "../utils/extractPdfText.js";
+import fs from "fs";
+import path from "path";
+import { extractTextFromPDF } from "../services/pdfService.js";
+import { generateGeminiResponse } from "../services/geminiService.js";
+import { buildReportReviewPrompt } from "../prompts/reportReviewPrompt.js";
+import { consumeAiRequest } from "../utils/aiQuota.js";
 
 const getMyProfile = async (req, res) => {
   try {
@@ -147,6 +154,29 @@ const submitReport = async (req, res) => {
     if (!student) return res.status(404).json({ message: "Student profile not found" });
 
     const title = (req.body.title || req.file.originalname.replace(/\.[^/.]+$/, "")).trim();
+    const filePath = req.file.path
+    let documentContent = null
+    try {
+      documentContent = await extractPdfText(filePath)
+    } catch {
+      documentContent = null
+    }
+
+    const existing = await Report.findOne({ where: { studentId: student.id } });
+    if (existing) {
+      const updated = await existing.update({
+        title: title || existing.title || "Internship report",
+        fileName: req.file.originalname,
+        fileUrl: `/uploads/${req.file.filename}`,
+        version: (existing.version || 1) + 1,
+        status: "submitted",
+        submittedAt: new Date(),
+        progress: 10,
+        documentContent,
+      });
+      return res.status(200).json({ message: "Report updated successfully. Send it to your supervisor or AI for analysis when ready.", report: updated });
+    }
+
     const report = await Report.create({
       studentId: student.id,
       title: title || "Internship report",
@@ -156,12 +186,31 @@ const submitReport = async (req, res) => {
       status: "submitted",
       submittedAt: new Date(),
       progress: 10,
+      documentContent,
     });
 
     return res.status(201).json({ message: "Report uploaded. Send it to your supervisor or AI for analysis when ready.", report });
   } catch (error) {
     console.error("SUBMIT REPORT ERROR:", error);
     return res.status(500).json({ message: "Unable to submit report", error: error.message });
+  }
+};
+
+const deleteReport = async (req, res) => {
+  try {
+    const student = await Student.findOne({ where: { userId: req.user.id } });
+    if (!student) return res.status(404).json({ message: "Student profile not found" });
+
+    const report = await Report.findOne({ where: { id: req.params.id, studentId: student.id } });
+    if (!report) return res.status(404).json({ message: "Report not found" });
+
+    const quota = await consumeAiRequest(student);
+
+    await report.destroy();
+    return res.status(200).json({ message: "Report deleted successfully" });
+  } catch (error) {
+    console.error("DELETE REPORT ERROR:", error);
+    return res.status(500).json({ message: "Unable to delete report", error: error.message });
   }
 };
 
@@ -174,8 +223,15 @@ const sendReportToSupervisor = async (req, res) => {
     if (!report) return res.status(404).json({ message: "Report not found" });
 
     const internship = await Internship.findOne({ where: { studentId: student.id } });
-    if (!internship?.academicSupervisorId) {
-      return res.status(400).json({ message: "You must be assigned to a supervisor before sending a report" });
+    if (!internship) return res.status(400).json({ message: "Internship assignment not found" });
+
+    const type = String(req.body.type || req.query.type || "academic").toLowerCase();
+    const isAcademic = type === "academic"
+    const supervisorId = isAcademic ? internship.academicSupervisorId : internship.professionalSupervisorId
+    const supervisorTypeLabel = isAcademic ? "academic" : "professional"
+
+    if (!supervisorId) {
+      return res.status(400).json({ message: `You must be assigned to a ${supervisorTypeLabel} supervisor before sending a report` });
     }
 
     await report.update({
@@ -185,13 +241,13 @@ const sendReportToSupervisor = async (req, res) => {
     });
 
     await Notification.create({
-      userId: internship.academicSupervisorId,
+      userId: supervisorId,
       title: "New report submitted",
       message: `A student has submitted \"${report.title}\" for your review.`,
       type: "info",
     });
 
-    return res.status(200).json({ message: "Report sent to your supervisor for review", report });
+    return res.status(200).json({ message: `Report sent to your ${supervisorTypeLabel} supervisor for review`, report, supervisorType: supervisorTypeLabel });
   } catch (error) {
     console.error("SEND REPORT TO SUPERVISOR ERROR:", error);
     return res.status(500).json({ message: "Unable to send report", error: error.message });
@@ -206,15 +262,124 @@ const sendReportToAi = async (req, res) => {
     const report = await Report.findOne({ where: { id: req.params.id, studentId: student.id } });
     if (!report) return res.status(404).json({ message: "Report not found" });
 
-    await report.update({
-      status: "ai_analysis",
-      progress: report.progress || 25,
+    // Mark as in-progress immediately so the UI can reflect it
+    await report.update({ status: "ai_analysis", progress: Math.max(report.progress || 0, 20) });
+
+    // --- Read the PDF file from disk and extract text ---
+    let pdfText = null;
+    if (report.fileUrl) {
+      try {
+        const relativeFile = report.fileUrl.replace(/^\/uploads\//, "");
+        const filePath = path.join(process.cwd(), "uploads", relativeFile);
+        if (fs.existsSync(filePath)) {
+          const buffer = fs.readFileSync(filePath);
+          const extracted = await extractTextFromPDF(buffer);
+          pdfText = extracted.text;
+        }
+      } catch (pdfErr) {
+        console.error("PDF read/extract error (will skip AI):", pdfErr.message);
+      }
+    }
+
+    if (!pdfText) {
+      // No text available — return current state without AI analysis
+      return res.status(200).json({
+        message: "Report marked for AI analysis. Unable to extract PDF text — please ensure the PDF contains selectable text.",
+        report,
+      });
+    }
+
+    // --- Call Gemini ---
+    const prompt = buildReportReviewPrompt(pdfText);
+    const rawResponse = await generateGeminiResponse(prompt);
+
+    // Strip markdown fences if any
+    const cleaned = rawResponse
+      .replace(/```json\s*/gi, "")
+      .replace(/```/g, "")
+      .trim();
+
+    let review;
+    try {
+      review = JSON.parse(cleaned);
+    } catch {
+      console.error("Gemini response was not valid JSON:", cleaned.slice(0, 300));
+      return res.status(200).json({
+        message: "AI analysis ran but the response could not be parsed. Please try again.",
+        report,
+      });
+    }
+
+    // --- Map Gemini response to the aiAnalysis shape the frontend expects ---
+    const summary = review.reviewSummary || {};
+
+    // metrics: { structure, clarity, grammar, originality, references } (0-100)
+    const metrics = {
+      structure: summary.structureScore ?? 0,
+      clarity: summary.languageScore ?? 0,
+      grammar: summary.languageScore ?? 0,
+      originality: summary.academicScore ?? 0,
+      references: summary.requirementsScore ?? 0,
+    };
+
+    // suggestions: map issues → suggestion cards
+    const suggestions = (review.issues || []).slice(0, 20).map((issue, idx) => ({
+      id: idx + 1,
+      section: issue.section || "",
+      location: issue.location || issue.section || "",
+      originalText: issue.originalText || "",
+      title: issue.explanation?.slice(0, 80) || issue.category || "Issue",
+      desc: issue.explanation || "",
+      suggestion: issue.suggestion || "",
+      type: issue.severity?.toLowerCase() === "high" ? "high"
+           : issue.severity?.toLowerCase() === "medium" ? "medium"
+           : "low",
+    }));
+
+    // strengths as extra positive suggestions
+    (review.strengths || []).slice(0, 5).forEach((strength, idx) => {
+      suggestions.push({
+        id: suggestions.length + idx + 1,
+        section: "Strengths",
+        title: strength.slice(0, 80),
+        desc: strength,
+        suggestion: "",
+        type: "positive",
+      });
     });
 
-    return res.status(200).json({ message: "Report sent to AI for analysis", report });
+    // overall aiScore: map 0-100 → 0-10
+    const overallScore = summary.overallScore ?? 0;
+    const aiScore = parseFloat((overallScore / 10).toFixed(1));
+
+    const aiAnalysis = {
+      metrics,
+      suggestions,
+      reviewSummary: summary,
+      sectionReview: review.sectionReview || [],
+      missingRequirements: review.missingRequirements || [],
+      generalFeedback: review.generalFeedback || [],
+      strengths: review.strengths || [],
+      issueCounts: summary.issueCounts || { high: 0, medium: 0, low: 0 },
+      analyzedAt: new Date().toISOString(),
+    };
+
+    const updated = await report.update({
+      status: "ai_analysis",
+      progress: 50,
+      aiScore,
+      aiAnalysis,
+    });
+
+    return res.status(200).json({
+      message: "AI analysis complete",
+      report: updated,
+      aiScore,
+      quota,
+    });
   } catch (error) {
     console.error("SEND REPORT TO AI ERROR:", error);
-    return res.status(500).json({ message: "Unable to send report to AI", error: error.message });
+    return res.status(error.statusCode || 500).json({ message: error.message || "Unable to send report to AI", ...(error.requestsRemaining != null ? { requestsRemaining: error.requestsRemaining } : {}) });
   }
 };
 
@@ -641,6 +806,7 @@ export {
   getMyProfile,
   getMyReports,
   submitReport,
+  deleteReport,
   sendReportToSupervisor,
   sendReportToAi,
   getMyFinalGrade,

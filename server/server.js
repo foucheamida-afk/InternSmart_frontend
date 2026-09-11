@@ -5,6 +5,7 @@ dotenv.config();
 import express from "express";
 import cors from "cors";
 import { DataTypes } from "sequelize";
+import aiRoutes from "./routes/aiRoutes.js";
 
 import { connectDB, sequelize } from "./config/db.js";
 
@@ -51,6 +52,19 @@ const ensureReportWorkspaceColumn = async () => {
   if (!columns.documentContent) {
     await queryInterface.addColumn("Reports", "documentContent", { type: DataTypes.JSON, allowNull: true });
     console.log("Added Reports.documentContent column");
+  }
+};
+
+const ensureReportAiColumns = async () => {
+  const queryInterface = sequelize.getQueryInterface();
+  const columns = await queryInterface.describeTable("Reports");
+  if (!columns.aiAnalysis) {
+    await queryInterface.addColumn("Reports", "aiAnalysis", { type: DataTypes.JSON, allowNull: true });
+    console.log("Added Reports.aiAnalysis column");
+  }
+  if (!columns.aiScore) {
+    await queryInterface.addColumn("Reports", "aiScore", { type: DataTypes.FLOAT, allowNull: true });
+    console.log("Added Reports.aiScore column");
   }
 };
 
@@ -165,12 +179,46 @@ const ensureInternshipGradeColumns = async () => {
     }
   }
 };
+// The User table may need status tracking columns.
+const ensureUserStatusColumns = async () => {
+  const queryInterface = sequelize.getQueryInterface();
+  const columns = await queryInterface.describeTable("Users");
+  const missingColumns = {
+    status: {
+      type: DataTypes.ENUM("online", "offline", "logged_in", "logged_out", "deactivated"),
+      allowNull: false,
+      defaultValue: "logged_out",
+    },
+    lastLoginAt: { type: DataTypes.DATE, allowNull: true },
+    lastLogoutAt: { type: DataTypes.DATE, allowNull: true },
+    deactivatedAt: { type: DataTypes.DATE, allowNull: true },
+  };
+
+  for (const [name, definition] of Object.entries(missingColumns)) {
+    if (!columns[name]) {
+      await queryInterface.addColumn("Users", name, definition);
+      console.log(`Added missing Users.${name} column`);
+    }
+  }
+};
+const ensureStudentAiColumns = async () => {
+  const queryInterface = sequelize.getQueryInterface();
+  const columns = await queryInterface.describeTable("Students");
+  if (!columns.aiRequestsToday) {
+    await queryInterface.addColumn("Students", "aiRequestsToday", { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 });
+    console.log("Added Students.aiRequestsToday column");
+  }
+  if (!columns.aiRequestsDate) {
+    await queryInterface.addColumn("Students", "aiRequestsDate", { type: DataTypes.DATEONLY, allowNull: true });
+    console.log("Added Students.aiRequestsDate column");
+  }
+};
 app.use(cors());
 app.use(express.json());
 app.use("/api/test", testRoutes);
 app.use(express.urlencoded({ extended: true }));
 app.use("/uploads", express.static("uploads"));
-
+app.use("/api/ai", aiRoutes);
 // Routes
 app.use("/api/users", authRoutes);
 app.use("/api/users", passwordRoutes);
@@ -189,11 +237,14 @@ app.listen(3000, async () => {
 
     await ensureTaskColumns();
     await ensureReportWorkspaceColumn();
+    await ensureReportAiColumns();
+    await ensureStudentAiColumns();
     await ensureInternshipColumns();
     await ensureInternshipProfessionalSupervisorColumn();
     await ensureMeetingGroupColumns();
     await ensureTaskFeedbackColumns();
     await ensureInternshipGradeColumns();
+    await ensureUserStatusColumns();
 
     await sequelize.sync({
       force: false

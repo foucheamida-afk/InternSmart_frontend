@@ -3,10 +3,12 @@ import fs from "fs";
 import path from "path";
 import multer from "multer";
 import protect from "../middleware/authMiddleware.js";
+import authorize from "../middleware/roleMiddleware.js";
 import {
   getMyProfile,
   getMyReports,
   submitReport,
+  deleteReport,
   sendReportToSupervisor,
   sendReportToAi,
   getMyFinalGrade,
@@ -40,21 +42,24 @@ const upload = multer({
   },
 });
 
-router.get("/me", protect, getMyProfile);
-router.get("/dashboard-stats", protect, getDashboardStats);
-router.get("/my-reports", protect, getMyReports);
-router.post("/reports", protect, upload.single("report"), submitReport);
-router.post("/reports/:id/send-to-supervisor", protect, sendReportToSupervisor);
-router.post("/reports/:id/send-to-ai", protect, sendReportToAi);
-router.get("/my-final-grade", protect, getMyFinalGrade);
-router.get("/my-supervisor-feedback", protect, getMySupervisorFeedback);
-router.get("/my-meetings", protect, getMyMeetings);
-router.get("/my-notifications", protect, getMyNotifications);
-router.put("/notifications/:id/read", protect, markNotificationRead);
-router.get("/my-tasks", protect, getMyTasks);
-router.put("/tasks/:id/toggle", protect, toggleTaskComplete);
-router.put("/tasks/:id/progress", protect, updateTaskProgress);
-router.post("/tasks/:id/submit", protect, submitTask);
-router.get("/tasks/:id/feedback", protect, getTaskFeedback);
+const studentOnly = authorize("student");
+
+router.get("/me", protect, studentOnly, getMyProfile);
+router.get("/dashboard-stats", protect, studentOnly, getDashboardStats);
+router.get("/my-reports", protect, studentOnly, getMyReports);
+router.post("/reports", protect, studentOnly, upload.single("report"), submitReport);
+router.delete("/reports/:id", protect, studentOnly, deleteReport);
+router.post("/reports/:id/send-to-supervisor", protect, studentOnly, sendReportToSupervisor);
+router.post("/reports/:id/send-to-ai", protect, studentOnly, sendReportToAi);
+router.get("/my-final-grade", protect, studentOnly, getMyFinalGrade);
+router.get("/my-supervisor-feedback", protect, studentOnly, getMySupervisorFeedback);
+router.get("/my-meetings", protect, studentOnly, getMyMeetings);
+router.get("/my-notifications", protect, studentOnly, getMyNotifications);
+router.put("/notifications/:id/read", protect, studentOnly, markNotificationRead);
+router.get("/my-tasks", protect, studentOnly, getMyTasks);
+router.put("/tasks/:id/toggle", protect, studentOnly, toggleTaskComplete);
+router.put("/tasks/:id/progress", protect, studentOnly, updateTaskProgress);
+router.post("/tasks/:id/submit", protect, studentOnly, submitTask);
+router.get("/tasks/:id/feedback", protect, studentOnly, getTaskFeedback);
 
 export default router;

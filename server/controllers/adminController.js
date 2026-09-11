@@ -322,12 +322,22 @@ export const toggleUserStatus = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const newStatus = !user.active;
-    await user.update({ active: newStatus });
+    const newActive = !user.active;
+    const updateData = { active: newActive }
+
+    if (newActive) {
+      updateData.status = "logged_out"
+      updateData.deactivatedAt = null
+    } else {
+      updateData.status = "deactivated"
+      updateData.deactivatedAt = new Date()
+    }
+
+    await user.update(updateData)
 
     return res.status(200).json({
-      message: `User ${newStatus ? 'activated' : 'deactivated'} successfully`,
-      user: { id: user.id, active: user.active },
+      message: `User ${newActive ? 'activated' : 'deactivated'} successfully`,
+      user: { id: user.id, active: user.active, status: updateData.status, deactivatedAt: updateData.deactivatedAt },
     });
   } catch (error) {
     console.error("TOGGLE USER STATUS ERROR:", error);

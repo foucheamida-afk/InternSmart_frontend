@@ -20,6 +20,6 @@ router.delete("/:id", protect, authorize("academic_supervisor"), deleteMeeting);
 router.put("/:id/initiate", protect, authorize("academic_supervisor"), initiateMeeting);
 
 // Student routes
-router.get("/student", protect, getStudentMeetings);
+router.get("/student", protect, authorize("student"), getStudentMeetings);
 
 export default router;

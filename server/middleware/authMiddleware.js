@@ -24,7 +24,7 @@ const protect = async (req, res, next) => {
       process.env.JWT_SECRET
     );
 
-    const user = await User.findByPk(decoded.id, { attributes: ["id", "active"] });
+    const user = await User.findByPk(decoded.id, { attributes: ["id", "active", "role"] });
     if (!user || !user.active) {
       return res.status(403).json({
         message: "This account has been deactivated. Please contact your administrator.",
@@ -33,7 +33,7 @@ const protect = async (req, res, next) => {
 
     console.log("TOKEN VERIFIED:", decoded);
 
-    req.user = decoded;
+    req.user = { ...decoded, role: user.role };
 
     next();
 

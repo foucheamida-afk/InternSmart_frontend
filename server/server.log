@@ -1,0 +1,34 @@
+◇ injected env (0) from .env // tip: ⌘ enable debugging { debug: true }
+◇ injected env (0) from .env // tip: ⌘ custom filepath { path: '/custom/path/.env' }
+Executing (default): SELECT 1+1 AS result
+Database connected successfully.
+Executing (default): SHOW FULL COLUMNS FROM `Tasks`;
+Executing (default): SHOW FULL COLUMNS FROM `Reports`;
+Executing (default): SHOW FULL COLUMNS FROM `Internships`;
+Executing (default): SHOW FULL COLUMNS FROM `Internships`;
+Executing (default): SHOW FULL COLUMNS FROM `Meetings`;
+Executing (default): SHOW FULL COLUMNS FROM `Tasks`;
+Executing (default): SHOW FULL COLUMNS FROM `Internships`;
+Executing (default): SHOW FULL COLUMNS FROM `Users`;
+Executing (default): SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME = 'Users' AND TABLE_SCHEMA = 'internSmart'
+Executing (default): SHOW INDEX FROM `Users`
+Executing (default): SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME = 'Students' AND TABLE_SCHEMA = 'internSmart'
+Executing (default): SHOW INDEX FROM `Students`
+Executing (default): SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME = 'Internships' AND TABLE_SCHEMA = 'internSmart'
+Executing (default): SHOW INDEX FROM `Internships`
+Executing (default): SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME = 'Reports' AND TABLE_SCHEMA = 'internSmart'
+Executing (default): SHOW INDEX FROM `Reports`
+Executing (default): SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME = 'Meetings' AND TABLE_SCHEMA = 'internSmart'
+Executing (default): SHOW INDEX FROM `Meetings`
+Executing (default): SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME = 'Notifications' AND TABLE_SCHEMA = 'internSmart'
+Executing (default): SHOW INDEX FROM `Notifications`
+Executing (default): SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME = 'DefenseAlerts' AND TABLE_SCHEMA = 'internSmart'
+Executing (default): SHOW INDEX FROM `DefenseAlerts`
+Executing (default): SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME = 'Tasks' AND TABLE_SCHEMA = 'internSmart'
+Executing (default): SHOW INDEX FROM `Tasks`
+Executing (default): SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME = 'ReportComments' AND TABLE_SCHEMA = 'internSmart'
+Executing (default): SHOW INDEX FROM `ReportComments`
+Executing (default): SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME = 'TimelineSettings' AND TABLE_SCHEMA = 'internSmart'
+Executing (default): SHOW INDEX FROM `TimelineSettings`
+Email service connected successfully.
+Server is running on port 3000

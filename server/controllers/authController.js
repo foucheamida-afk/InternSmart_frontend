@@ -52,7 +52,13 @@ const login = async (req, res) => {
     // 7. Generate JWT
     const token = generateToken(user);
 
-    // 8. Successful login
+    // 8. Update user status
+    await user.update({
+      status: "logged_in",
+      lastLoginAt: new Date(),
+    });
+
+    // 9. Successful login
     return res.status(200).json({
       message: "Login successful",
 
@@ -67,6 +73,8 @@ const login = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        status: "logged_in",
+        lastLoginAt: user.lastLoginAt,
       },
     });
 
@@ -80,4 +88,24 @@ const login = async (req, res) => {
   }
 };
 
+const logout = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (userId) {
+      await User.update(
+        { status: "logged_out", lastLogoutAt: new Date() },
+        { where: { id: userId } }
+      );
+    }
+    return res.status(200).json({ message: "Logout successful" });
+  } catch (error) {
+    console.error("LOGOUT ERROR:", error);
+    return res.status(500).json({
+      message: "Server error during logout",
+      error: error.message,
+    });
+  }
+};
+
+export { login, logout };
 export default login;

@@ -45,6 +45,27 @@ const User = sequelize.define("User", {
     allowNull: false,
     defaultValue: true,
   },
+
+  status: {
+    type: DataTypes.ENUM("online", "offline", "logged_in", "logged_out", "deactivated"),
+    allowNull: false,
+    defaultValue: "logged_out",
+  },
+
+  lastLoginAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+
+  lastLogoutAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+
+  deactivatedAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
 });
 
 export default User;

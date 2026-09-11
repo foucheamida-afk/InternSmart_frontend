@@ -24,6 +24,17 @@ const Student = sequelize.define("Student", {
     type: DataTypes.STRING,
     allowNull: false,
   },
+
+  aiRequestsToday: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+  },
+
+  aiRequestsDate: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+  },
 });
 
 export default Student;
