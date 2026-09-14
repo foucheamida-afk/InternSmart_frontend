@@ -12,6 +12,7 @@ import path from "path";
 import { extractTextFromPDF } from "../services/pdfService.js";
 import { generateGeminiResponse } from "../services/geminiService.js";
 import { buildReportReviewPrompt } from "../prompts/reportReviewPrompt.js";
+import { computeComposite } from "../utils/gradeCalculator.js";
 import { consumeAiRequest, refundAiRequest } from "../utils/aiQuota.js";
 
 const getOrCreateStudent = async (userId) => {
@@ -795,6 +796,15 @@ const getMyFinalGrade = async (req, res) => {
     const academicMaxTotal = internship.academicGradeBreakdown?.reduce((sum, item) => sum + (item.max || 0), 0) || 20;
     const professionalMaxTotal = internship.professionalGradeBreakdown?.reduce((sum, item) => sum + (item.max || 0), 0) || 10;
 
+    // Derived on read as well as persisted, so the figure stays correct for
+    // internships graded before the composite existed.
+    const composite = computeComposite({
+      academicGrade: internship.academicGrade,
+      academicSubmitted: internship.academicGradeStatus === "submitted" && internship.academicGrade != null,
+      professionalGrade: internship.professionalGrade,
+      professionalSubmitted: internship.professionalGradeStatus === "submitted" && internship.professionalGrade != null,
+    });
+
     return res.status(200).json({
       grade: {
         academic: {
@@ -811,6 +821,11 @@ const getMyFinalGrade = async (req, res) => {
           gradeStatus: internship.professionalGradeStatus,
           gradeSubmittedAt: internship.professionalGradeSubmittedAt,
         },
+        // The combined final mark (FR-GRD-01). `finalized` is only true once BOTH
+        // supervisors have submitted, and `final.score` is null until then
+        // (FR-GRD-03) rather than showing a misleading partial total.
+        final: composite,
+        finalized: composite.ready,
       },
     });
   } catch (error) {

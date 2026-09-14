@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { GraduationCap, Trophy } from 'lucide-react'
 import { studentDashboardService } from '../../services/api'
 
 export default function FinalGradeCard() {
   const [grades, setGrades] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
 
   useEffect(() => {
     const fetchGrade = async () => {
@@ -14,7 +13,6 @@ export default function FinalGradeCard() {
         setGrades(data.grade || null)
       } catch (err) {
         console.error('Fetch final grade error:', err)
-        setError('Unable to load your final grade')
       } finally {
         setLoading(false)
       }
@@ -52,6 +50,42 @@ export default function FinalGradeCard() {
       <div className="card-header">
         <h3 className="card-title">Final Grades</h3>
       </div>
+
+      {/* Combined final mark (FR-GRD-01). Shown only once BOTH supervisors have
+          submitted, so a partial total is never presented as the final grade. */}
+      {grades?.finalized && grades?.final ? (
+        <div
+          className="mt-4 rounded-2xl border p-4"
+          style={{ borderColor: 'var(--line)', backgroundColor: 'rgba(245, 166, 35, 0.08)' }}
+        >
+          <div className="flex items-center gap-2">
+            <Trophy size={16} style={{ color: '#F5A623' }} />
+            <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+              Final Grade
+            </span>
+          </div>
+
+          <div className="mt-2 flex items-end gap-2">
+            <span className="text-4xl font-bold" style={{ color: '#F5A623' }}>{grades.final.score}</span>
+            <span className="text-lg mb-1" style={{ color: 'var(--text-muted)' }}>/ {grades.final.max}</span>
+            <span className="text-sm mb-1 ml-1" style={{ color: 'var(--text-soft)' }}>({grades.final.percentage}%)</span>
+          </div>
+
+          <p className="mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            Academic {Math.round(grades.final.weights.academic * 100)}% · Professional {Math.round(grades.final.weights.professional * 100)}%
+          </p>
+        </div>
+      ) : (
+        <div
+          className="mt-4 flex items-center gap-2 rounded-2xl border p-3 text-xs"
+          style={{ borderColor: 'var(--line)', color: 'var(--text-muted)' }}
+        >
+          <GraduationCap size={15} />
+          <span>
+            Final grade pending — {[isAcademicSubmitted, isProfessionalSubmitted].filter(Boolean).length} of 2 evaluations submitted.
+          </span>
+        </div>
+      )}
 
       <div className="mt-4 space-y-6">
         {/* Academic Supervisor Grade (20%) */}

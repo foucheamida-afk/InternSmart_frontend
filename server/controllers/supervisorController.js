@@ -5,6 +5,7 @@ import Report from "../models/reportModel.js";
 import Student from "../models/studentModel.js";
 import User from "../models/userModel.js";
 import Internship from "../models/studentAssignmentModel.js";
+import { ACADEMIC_MAX, round2, persistCompositeGrade } from "../utils/gradeCalculator.js";
 
 const generateJitsiLink = (meetingId, title) => {
   const slug = `${title || "meeting"}-${meetingId}-${Date.now()}`
@@ -288,10 +289,37 @@ export const initiateMeeting = async (req, res) => {
     const updatedLink = meeting.meetingLink?.startsWith("https://meet.jit.si/")
       ? meeting.meetingLink
       : generateJitsiLink(`academic-${supervisorId}-${id}`, meeting.title);
+
     await meeting.update({
       status: "scheduled",
       meetingLink: updatedLink,
     });
+
+    let studentIdsToNotify = [];
+    if (meeting.isGroupMeeting && Array.isArray(meeting.studentIds) && meeting.studentIds.length > 0) {
+      studentIdsToNotify = meeting.studentIds;
+    } else if (meeting.studentId) {
+      studentIdsToNotify = [meeting.studentId];
+    }
+
+    if (studentIdsToNotify.length > 0) {
+      const targetStudents = await Student.findAll({
+        where: { id: studentIdsToNotify },
+        attributes: ["id", "userId"],
+      });
+
+      for (const s of targetStudents) {
+        if (s.userId) {
+          await Notification.create({
+            userId: s.userId,
+            title: "Meeting Started",
+            message: `Meeting "${meeting.title}" has started. Join now!`,
+            type: "info",
+            meetingLink: updatedLink,
+          });
+        }
+      }
+    }
 
     return res.status(200).json({
       message: "Meeting initiated successfully",
@@ -546,14 +574,35 @@ export const submitFinalGrade = async (req, res) => {
       return res.status(403).json({ message: "You are not assigned to this student" });
     }
 
-    const normalized = breakdown.map((item) => ({
+    const rubric = breakdown.map((item) => ({
       label: String(item.label || "Criterion"),
       score: Math.max(0, Number(item.score) || 0),
       max: Math.max(1, Number(item.max) || 0),
+      // Rubric feedback used to be dropped on the way to the database (FR-GRD-02).
+      feedback: String(item.feedback || "").trim(),
     }));
 
-    const total = normalized.reduce((sum, item) => sum + item.score, 0);
-    const maxTotal = normalized.reduce((sum, item) => sum + item.max, 0);
+    const rubricMaxTotal = rubric.reduce((sum, item) => sum + item.max, 0);
+
+    // Rescale whatever rubric the client sent onto the institutional 20-point
+    // scale and cap it. The server, not the browser, now owns "out of 20": the
+    // previous implementation stored a raw sum of whichever maxima arrived, so
+    // the total was unbounded and did not mean 20 points.
+    const normalized = rubric.map((item) => {
+      const rescaledMax = (item.max / rubricMaxTotal) * ACADEMIC_MAX;
+      const cappedScore = Math.min(item.score, item.max);
+      return {
+        label: item.label,
+        score: round2((cappedScore / item.max) * rescaledMax),
+        max: round2(rescaledMax),
+        feedback: item.feedback,
+      };
+    });
+
+    const total = round2(
+      Math.min(ACADEMIC_MAX, normalized.reduce((sum, item) => sum + item.score, 0))
+    );
+    const maxTotal = ACADEMIC_MAX;
 
     await internship.update({
       academicGrade: total,
@@ -563,12 +612,17 @@ export const submitFinalGrade = async (req, res) => {
       academicGradeSubmittedBy: supervisorId,
     });
 
+    // Recompute the combined mark now that this half has arrived (FR-GRD-01).
+    const composite = await persistCompositeGrade(internship);
+
     const student = await Student.findByPk(studentId);
     if (student?.userId) {
       await Notification.create({
         userId: student.userId,
         title: "Academic supervisor grade submitted",
-        message: `Your academic supervisor submitted your grade: ${total}/${maxTotal} (20%).`,
+        message: composite.ready
+          ? `Your academic supervisor submitted your grade: ${total}/${maxTotal}. Your final grade is now available.`
+          : `Your academic supervisor submitted your grade: ${total}/${maxTotal} (out of 20).`,
         type: "success",
       });
     }
@@ -582,6 +636,7 @@ export const submitFinalGrade = async (req, res) => {
         gradeStatus: "submitted",
         gradeSubmittedAt: internship.academicGradeSubmittedAt,
       },
+      composite,
     });
   } catch (error) {
     console.error("SUBMIT FINAL GRADE ERROR:", error);
