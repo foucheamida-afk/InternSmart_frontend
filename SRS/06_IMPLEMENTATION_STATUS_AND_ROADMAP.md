@@ -11,12 +11,12 @@ This document answers a single question: **how much of this specification is act
 | Measure | Result |
 | :--- | :--- |
 | Requirements audited | **80** (60 functional + 20 non-functional) |
-| **Fully implemented** | **24 — 30.0 %** |
-| Partially implemented | **36 — 45.0 %** |
+| **Fully implemented** | **27 — 33.8 %** |
+| Partially implemented | **33 — 41.3 %** |
 | Not implemented (roadmap) | **16 — 20.0 %** |
 | Not verifiable statically (runtime targets) | **4 — 5.0 %** |
 | **Present at least partially** (implemented + partial) | **60 of 80 — 75.0 %** |
-| Weighted completeness (implemented = 1, partial = 0.5) | **52.5 %** |
+| Weighted completeness (implemented = 1, partial = 0.5) | **54.4 %** |
 | Operational pillars delivered | **5 of 6** |
 
 **The single most important finding:** the **Internal Academic Plagiarism Detection Engine**, which v2.0 presents as the flagship of the release, is **0 % implemented**. It accounts for **11 of the 13 missing functional requirements** (85 %). Excluding that one module, the remaining delivered scope is **95.9 % present** (47 of 49 requirements implemented or partial) — the platform is substantially built, and the specification's centre of gravity simply does not match the code. *(Figures updated 2026-09-14 after the P0 and correctness passes.)*
@@ -37,10 +37,10 @@ For a non-technical reader: the platform manages internships, reports, supervisi
 | 4.6 Professional Supervisor (PSUP) | 3 | 1 | 0 | 4 | 75.0 % |
 | 4.7 Meeting Management (MTG) | 3 | 2 | 0 | 5 | 60.0 % |
 | 4.8 Task Management (TSK) | 2 | 2 | 0 | 4 | 50.0 % |
-| 4.9 Dual Evaluation & Grading (GRD) | 0 | 3 | 0 | 3 | 0 % |
+| 4.9 Dual Evaluation & Grading (GRD) | 3 | 0 | 0 | 3 | 100 % |
 | 4.10 Administration & Cleanup (ADM) | 1 | 4 | 1 | 6 | 16.7 % |
 | 4.11 Timeline & Defence Alerts (TIM) | 1 | 1 | 1 | 3 | 33.3 % |
-| **Total** | **22** | **25** | **13** | **60** | **36.7 %** |
+| **Total** | **25** | **22** | **13** | **60** | **41.7 %** |
 
 ## 6.3 Non-Functional Coverage
 
@@ -123,8 +123,8 @@ Ordered by severity. These are correctness and deployability problems, distinct 
 6. ~~**No foreign keys at all.**~~ **CORRECTED 2026-09-14 — the original claim was wrong.** Sequelize infers `references` from associations, so `sync()` **does** create foreign keys: a freshly synced schema has **13** FK constraints, with `CASCADE`/`SET NULL` chosen by whether the column is nullable. **The live database has only 7**, because `sync({ force: false })` never alters pre-existing tables — `internships→students`, `internships→users` (×2), `meetings→students` and `tasks→users` are unenforced there. Note `reports→students` is `SET NULL`, so a database-level student delete would *orphan* reports rather than remove them — which is precisely why the programmatic routine is still required. *(Partially open — `NFR-REL-01`.)*
 7. ~~**The 10 MB upload cap is bypassed on the AI path**~~ **RESOLVED 2026-09-14** — the AI uploader is now 10 MB with an exact MIME check, returns **413** when over the limit, and `/api/ai/*` carries a role guard (verified: admin → 403, student → allowed, anonymous → 401). **Remaining sub-item:** the CSV uploader still accepts `text/csv` or any `.csv` filename.
 8. ~~**Configuration is hardcoded.**~~ **RESOLVED 2026-09-14** — DB name/user/password/host/port/dialect, the server port, the client API base URL and the email portal link are all environment-driven with behaviour-preserving fallbacks; `PORT`, `DB_PORT` and `CLIENT_URL` were added to `.env`. *(The AI daily limit remains a hardcoded constant in two places.)*
-9. **Upload validation is extension-based**, not the specified exact-MIME allow-list, and no script-header stripping exists.
-10. **Grade integrity is cosmetic.** The academic grade has no server-side 20-point cap and no rubric validation, and the two supervisor grades are never combined into the composite score the SRS requires.
+9. ~~**Upload validation is extension-based**, not the specified exact-MIME allow-list~~ **PARTIALLY RESOLVED 2026-09-14** — both PDF upload paths now require the declared `application/pdf` MIME type, not merely a `.pdf` filename, and the AI path is capped at the specified 10 MB. **Still open:** the CSV uploader accepts `text/csv` **or** any `.csv` filename, and no script-header stripping exists anywhere.
+10. ~~**Grade integrity is cosmetic.**~~ **RESOLVED 2026-09-14** — the academic grade is now rescaled to the institutional 20-point scale and capped **server-side** (it previously stored an unbounded raw sum of whatever maxima the browser sent), rubric feedback is persisted instead of dropped, and each submission recomputes a weighted composite (academic ⅔, professional ⅓) onto a 0–20 final mark, exposed to students behind a `finalized` gate that requires both evaluations.
 
 ### Newly discovered during the 2026-09-14 remediation
 
@@ -168,7 +168,7 @@ Ordered by severity. These are correctness and deployability problems, distinct 
 
 ### P1 — Requirement compliance
 8. Declare `onDelete` policies / real foreign keys (`NFR-REL-01`).
-9. Enforce a 20-point cap and rubric validation server-side; compute a composite grade; persist rubric feedback (`FR-GRD-01..03`).
+9. ~~Enforce a 20-point cap and rubric validation server-side; compute a composite grade; persist rubric feedback (`FR-GRD-01..03`).~~ **DONE 2026-09-14** — implemented in `utils/gradeCalculator.js` plus both submit handlers and the student endpoint; verified that a 10-point rubric scoring 10/10 becomes 20/20, and that a 20/20 academic combined with 5/10 professional yields 16.67/20 (83.33 %).
 10. Add the pre-grading integrity guard once `FR-PLAG-09` is scoped.
 11. ~~Apply the 10 MB cap and exact-MIME validation to the AI upload path; add the missing `authorize` guard on `/api/ai/*` (`NFR-SEC-03`, `-04`).~~ **DONE 2026-09-14** — the AI uploader is now 10 MB with an exact MIME check and returns 413 when over the limit; the student report uploader requires MIME as well as extension; and `/api/ai/*` is restricted to the three non-admin roles. **Remaining:** the CSV uploader still accepts `text/csv` or any `.csv` filename, and there is no script-header stripping anywhere.
 12. Complete pagination coverage and clamp the `limit` parameter (`NFR-PERF-05`).
@@ -273,6 +273,21 @@ Verified on a scratch database: a wrong code decrements the allowance and the 6t
 
 **Upload hardening** (`NFR-SEC-03`, `NFR-SEC-04`): the AI uploader dropped from **20 MB to the specified 10 MB**; the student uploader now requires the declared `application/pdf` MIME type as well as the `.pdf` extension; Multer limit errors return **413** with a readable message instead of an opaque 500; and `/api/ai/*` is role-guarded. Verified: 11 MB → 413, non-PDF → 400, `text/plain` named `.pdf` → 400, valid PDF → accepted, admin → 403 on AI routes, anonymous → 401. Both requirements were re-graded (`NFR-SEC-03` → Implemented).
 
+### 2026-09-14 — Correctness pass 5 (composite final grade)
+
+`FR-GRD-01..03` are now implemented. Students finally receive a single final mark instead of two uncombined scores.
+
+| Aspect | Behaviour |
+| :--- | :--- |
+| Academic scale | Rubric rescaled to **/20** and capped **server-side** (previously an unbounded raw sum of whatever maxima arrived) |
+| Professional scale | Rubric rescaled to **/10** and capped (already correct) |
+| Composite | Academic **⅔** + professional **⅓** of the combined percentage, projected onto **0–20**; a perfect 20 + 10 gives 20/20 |
+| Gating | `finalized` is true only when **both** evaluations are submitted, and `final.score` is `null` beforehand |
+| Rubric feedback | Now persisted — `feedback` was previously dropped by both mappers |
+| Storage | The previously unused `finalGrade`/`gradeBreakdown`/`gradeStatus` columns now hold the composite |
+
+Verified on a scratch database: a 10-point rubric scoring 10/10 normalised to **20/20**; the composite was not ready after the academic half alone (`finalGrade` NULL, `gradeStatus` `pending`); after a 5/10 professional grade it came out at **16.67/20 (83.33 %)** — matching 100×(⅔) + 50×(⅓); the student endpoint returned `finalized: true` with both feedback strings intact; and with the professional half cleared it returned `finalized: false` and a null score while still showing the academic component. No composite values were written to the live database, which has no grades recorded yet.
+
 ### Still open
 
-Password recovery is closed. What remains is: **the plagiarism decision** (build or formally descope the landing-page claim); the **six foreign keys missing from the live database**; **grade-composite arithmetic** (`FR-GRD-01`); **CSV MIME-vs-filename leniency** and the absence of **script-header stripping** (`NFR-SEC-04`); the **standardised error envelope** (`NFR-MNT-04` — 0 of ~314 handlers comply); **real-time delivery** (Socket.IO declared but never initialised); **code-splitting** for the 2 MB bundle (`NFR-PERF-04`); and **all four runtime performance targets**.
+Password recovery and composite grading are closed. What remains is: **the plagiarism decision** (build it, or formally descope the landing-page claim); the **six foreign keys missing from the live database**; **CSV MIME-vs-filename leniency** and the absence of **script-header stripping** (`NFR-SEC-04`); the **standardised error envelope** (`NFR-MNT-04` — 0 of ~314 handlers comply); **real-time delivery** (Socket.IO declared but never initialised); **code-splitting** for the 2 MB bundle (`NFR-PERF-04`); and **all four runtime performance targets**.

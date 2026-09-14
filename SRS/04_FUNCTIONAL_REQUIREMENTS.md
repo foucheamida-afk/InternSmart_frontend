@@ -7,7 +7,7 @@ Requirement IDs follow the v2.0 numbering for traceability. Two corrections are 
 - **§4.11 IDs:** v2.0's normative text used `FR-ADM-07..09` while its own index used `FR-TIM-01..03`. This edition adopts **`FR-TIM-01..03`** (the section is titled "Timeline & Defense Alert Management (TIM)").
 - Statuses reflect a static audit of the repository as of 2026-09-14. Requirements marked **Missing (Roadmap)** are retained as design intent, not as delivered behaviour.
 
-**Coverage: 22 Implemented · 25 Partial · 13 Missing — of 60 requirements.**
+**Coverage: 25 Implemented · 22 Partial · 13 Missing — of 60 requirements.**
 
 ---
 
@@ -118,7 +118,7 @@ Requirement IDs follow the v2.0 numbering for traceability. Two corrections are 
 - `FR-SUP-01` payload carries identity, matricule, class, company and report id only — **no progress %, no AI score, no plagiarism flag**.
 - `FR-SUP-02`: comments are accepted through the **workspace** routes (`/api/workspace/reports/:id/comments`), not a supervisor route. The AI breakdown is returned by `GET /api/supervisor/reports` but is **never rendered** in the supervisor UI. The **Plagiarism Inspector does not exist**.
 - `FR-SUP-03`: the API passes the submitted status straight to the model, relying on the DB ENUM for validation; the supervisor UI only ever sends `in_review` — `approved`/`needs_revision` are reachable only from the admin portal.
-- `FR-SUP-04`: the **SRS path `/api/supervisor/grade` does not exist**; the real path is `/api/supervisor/interns/:studentId/grade`. The server sums the submitted rubric with **no 20-point cap and no rubric validation** (only `score >= 0` and `max >= 1`); "out of 20" exists only as a client-side default rubric totalling 20. The delivered rubric criteria also differ from the SRS text.
+- `FR-SUP-04`: the **SRS path `/api/supervisor/grade` does not exist**; the real path is `/api/supervisor/interns/:studentId/grade`. **Fixed 2026-09-14:** the server now rescales the submitted rubric onto the institutional 20-point scale and caps the total server-side — previously it stored an unbounded raw sum of whichever maxima the browser sent, so "out of 20" existed only as a client-side default. The delivered rubric criteria still differ from the SRS text.
 - The supervisor report PDF link is **hardcoded to `http://localhost:3000`** (`SupervisorDashboard.jsx:1051`), breaking outside local development.
 
 ---
@@ -179,15 +179,15 @@ Requirement IDs follow the v2.0 numbering for traceability. Two corrections are 
 
 | Req ID | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
-| FR-GRD-01 | Dual grade weighting (20 + 10) | **Partial** | `supervisorController.js:576-586`; `professionalSupervisorController.js:642-663`; `FinalGradeCard.jsx:36-48` |
-| FR-GRD-02 | Structured rubric JSON with feedback | **Partial** | `supervisorController.js:576-587`; `professionalSupervisorController.js:642-664` |
-| FR-GRD-03 | Student grade breakdown view | **Partial** | `studentRoutes.js:54`; `studentController.js:762-795` |
+| FR-GRD-01 | Dual grade weighting (20 + 10) | **Implemented** | `utils/gradeCalculator.js`; `supervisorController.js` → `submitFinalGrade`; `professionalSupervisorController.js` → `submitFinalGrade` |
+| FR-GRD-02 | Structured rubric JSON with feedback | **Implemented** | both submit handlers persist `label`/`score`/`max`/**`feedback`** |
+| FR-GRD-03 | Student grade breakdown view | **Implemented** | `studentController.js` → `getMyFinalGrade` (`final` + `finalized`); `FinalGradeCard.jsx` |
 
-**Deviations**
-- **The two grades are never combined.** The academic side stores the **raw sum** of the submitted rubric (no normalisation to 20, no cap); the professional side rescales to a maximum of 10 and caps it. **No arithmetic anywhere combines the two into a composite**, and the UI shows two independent scores. v2.0's "normalized composite final score" therefore has neither computation nor storage.
-- `FR-GRD-02`: rubric breakdowns are persisted as JSON with `label`/`score`/`max`, but **feedback comments are stripped** by both mappers — no feedback key is stored or rendered.
-- `FR-GRD-03`: the real path is `GET /api/students/my-final-grade`. **There is no gating** on both evaluations being submitted; the endpoint returns whatever exists, and only the client hides unsubmitted blocks.
-- **Schema duplication:** `Internships` retains a legacy `finalGrade`/`gradeBreakdown`/`gradeStatus`/`gradeSubmittedAt`/`gradeSubmittedBy` set alongside the newer `academicGrade*` and `professionalGrade*` sets. No controller writes the legacy columns, and `server.js:74-91` still migrates them on startup. The name `finalGrade` reappears as a **response alias** for the per-role grades, which is misleading.
+**Deviations (updated 2026-09-14)**
+- **The composite final grade is now computed.** Each submission rescales its rubric onto the institutional scale (academic `/20`, professional `/10`), and every submission recomputes a weighted composite — **academic ⅔, professional ⅓**, mirroring the 20:10 point split — projected back onto a **0–20** final mark, so a perfect 20 + 10 yields 20/20. The previous behaviour was worse than v2.0 implied: the academic total was an **unbounded raw sum** of whichever maxima the browser sent, and nothing anywhere combined the two.
+- `FR-GRD-02`: rubric breakdowns persist `label`/`score`/`max` **and now `feedback`**, which both mappers previously dropped before the data reached the database.
+- `FR-GRD-03`: `GET /api/students/my-final-grade` returns `final` (score, max, percentage, weights and per-component percentages) plus a **`finalized` flag that is true only once BOTH evaluations have been submitted**; `final.score` is `null` until then, so a partial total is never presented as the final grade. `FinalGradeCard.jsx` renders the combined mark, or a "pending — n of 2 evaluations submitted" indicator.
+- **Schema reuse resolved:** the previously unused legacy columns (`finalGrade`, `gradeBreakdown`, `gradeStatus`, `gradeSubmittedAt`) are now the storage location for the composite, so there is a single combined mark rather than a third parallel field.
 
 ---
 
