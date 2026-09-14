@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import { StarterKit } from '@tiptap/starter-kit'
 import { Underline } from '@tiptap/extension-underline'
@@ -14,8 +14,10 @@ import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import api from '../api/axios'
+import { getStoredToken, getStoredUser } from '../utils/storage'
 import {
   Undo2, Redo2, Printer, Eye, Download, Share2, Search, Replace, CheckCircle2,
+  AlertCircle, AlertTriangle, Sparkles, Send,
   Bold, Italic, Underline as UnderlineIcon, Strikethrough,
   AlignLeft, AlignCenter, AlignRight, AlignJustify, List, ListOrdered, Quote,
   ZoomIn, ZoomOut, FileText, Wifi, PanelRight, X, MoreHorizontal, MessageSquare,
@@ -23,7 +25,8 @@ import {
   Table, Image as ImageIcon, Link as LinkIcon, BookOpen, Bookmark, SpellCheck, PenLine, Ruler, Layout, Mail,
   HelpCircle, File, Home, Plus, Minus, Clipboard, Paintbrush, Hash,
   Lightbulb, CheckSquare, Clock, ChevronRight,
-  PanelLeftClose, PanelLeftOpen, Scissors, Copy, Trash2
+  PanelLeftClose, PanelLeftOpen, Scissors, Copy, Trash2,
+  Maximize2, Minimize2, Split, Brain,
 } from 'lucide-react'
 import { Link as LinkExtension } from '@tiptap/extension-link'
 import { Image as ImageExtension } from '@tiptap/extension-image'
@@ -228,6 +231,35 @@ export default function WritingWorkspace() {
   const [searchQuery, setSearchQuery] = useState('')
   const [yjsDoc] = useState(() => new Y.Doc())
   const storageKey = `${DOCUMENT_PREFIX}${reportId || 'new'}`
+
+  // Debounced saving. Previously a PUT fired from onUpdate, i.e. one full-document
+  // database write on every keystroke. Edits are now coalesced into a single write,
+  // and whatever is still pending is flushed when the report changes or the
+  // workspace unmounts, so navigating away cannot silently discard the last edits.
+  const saveTimerRef = useRef(null)
+  const pendingSaveRef = useRef(null)
+
+  const flushWorkspaceSave = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+
+    const pending = pendingSaveRef.current
+    pendingSaveRef.current = null
+    if (!pending?.content || !pending?.reportId) return undefined
+
+    return api
+      .put(`/workspace/reports/${pending.reportId}/workspace`, { documentContent: pending.content })
+      .then(() => setSaveStatus('Saved'))
+      .catch(() => setSaveStatus('Offline - saved locally'))
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      flushWorkspaceSave()
+    }
+  }, [reportId, flushWorkspaceSave])
   const [isPreview, setIsPreview] = useState(false)
   const [showMore, setShowMore] = useState(false)
   const [sections, setSections] = useState([])
@@ -237,6 +269,14 @@ export default function WritingWorkspace() {
   const [replacementText, setReplacementText] = useState('')
   const [showColorPicker, setShowColorPicker] = useState(false)
   const [showSpecialChars, setShowSpecialChars] = useState(false)
+  const [aiChatInput, setAiChatInput] = useState('')
+  const [aiMessages, setAiMessages] = useState([])
+  const [isAiSending, setIsAiSending] = useState(false)
+  const [showWorkspaceErrorInspector, setShowWorkspaceErrorInspector] = useState(false)
+  const [expandedWorkspaceViewMode, setExpandedWorkspaceViewMode] = useState('split') // 'split' | 'chat' | 'errors'
+  const [expandedWorkspaceErrorId, setExpandedWorkspaceErrorId] = useState(null)
+  const [aiCopiedId, setAiCopiedId] = useState(null)
+  const [reportAnalysis, setReportAnalysis] = useState(null)
 
   const normalizeWorkspaceContent = (raw) => {
     let content = raw
@@ -289,16 +329,21 @@ export default function WritingWorkspace() {
         class: 'ww-editor',
       },
     },
-    onUpdate: () => {
+    onUpdate: ({ editor: instance }) => {
       setSaveStatus('Saving...')
       setSavedAt(new Date())
       setPageCount(Math.max(1, Math.ceil((paperRef.current?.scrollHeight || 1123) / 1123)))
       if (reportId && !isReadOnly) {
-        api.put(`/workspace/reports/${reportId}/workspace`, { documentContent: editor?.getJSON() }).then(() => {
-          setSaveStatus('Saved')
-        }).catch(() => {
-          setSaveStatus('Offline - saved locally')
-        })
+        // Coalesce bursts of typing into one write, and remember which report the
+        // pending content belongs to so a flush always targets the right row.
+        pendingSaveRef.current = {
+          reportId,
+          content: instance?.getJSON?.() ?? editor?.getJSON?.(),
+        }
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = setTimeout(() => {
+          flushWorkspaceSave()
+        }, 1200)
       }
     },
   })
@@ -430,7 +475,7 @@ export default function WritingWorkspace() {
       formData.append('report', pdfBlob, `${title || 'internship-report'}.pdf`)
       formData.append('title', title || 'Internship report')
 
-      const token = localStorage.getItem('token')
+      const token = getStoredToken()
       const response = await fetch('http://localhost:3000/api/students/reports', {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -694,11 +739,7 @@ export default function WritingWorkspace() {
   /* Read student name from whichever key the auth layer uses */
   const studentName = (() => {
     try {
-      const raw =
-        localStorage.getItem('user') ||
-        localStorage.getItem('internSmart_user') ||
-        '{}'
-      const parsed = JSON.parse(raw)
+      const parsed = getStoredUser()
       return parsed?.student?.name || parsed?.name || 'Student'
     } catch {
       return 'Student'
@@ -1241,9 +1282,124 @@ export default function WritingWorkspace() {
                 </div>
               )}
               {assistantTab === 'ai' && (
-                <div className="ww-empty">
-                  <p>AI Assistant will help improve academic wording, grammar, and clarity.</p>
-                  <p className="ww-muted">Select text and ask for improvements.</p>
+                <div className="ww-ai-chat flex flex-col h-full space-y-3">
+                  {/* Header action bar with Error Inspector Icon Button */}
+                  <div className="flex items-center justify-between pb-2 border-b border-[var(--line)]">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-[var(--orange-3)]">
+                      <Sparkles size={15} />
+                      <span>AI Writing Assistant</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        title="Expand Chatbot & Section Errors Widely"
+                        aria-label="Expand Chatbot & Section Errors"
+                        onClick={() => setShowWorkspaceErrorInspector(true)}
+                        className="p-1.5 rounded-lg border border-[var(--orange-3)]/30 bg-[var(--orange)]/10 text-[var(--orange-3)] hover:bg-[var(--orange)]/20 transition cursor-pointer flex items-center justify-center"
+                      >
+                        <Maximize2 size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        title="Inspect Exact Errors, Explanations & Suggested Answers"
+                        aria-label="Inspect Exact Errors"
+                        onClick={() => setShowWorkspaceErrorInspector(true)}
+                        className={`relative p-1.5 rounded-lg border transition cursor-pointer flex items-center justify-center ${
+                          showWorkspaceErrorInspector
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 ring-2 ring-amber-500/30'
+                            : 'bg-[var(--bg-panel)] text-amber-400 border-[var(--line)] hover:bg-amber-500/10 hover:border-amber-500/40'
+                        }`}
+                      >
+                        <AlertCircle size={15} className="text-amber-400 animate-pulse" />
+                        <span className="absolute -top-1 -right-1 rounded-full bg-amber-500 text-black px-1 text-[8px] font-bold">
+                          2
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Messages Stream */}
+                  <div className="flex-1 overflow-y-auto space-y-2 pr-1 text-xs min-h-[160px]">
+                    {aiMessages.length === 0 ? (
+                      <div className="text-center py-6 text-[11px] text-[var(--text-muted)] space-y-2">
+                        <Brain size={24} className="mx-auto text-[var(--text-muted)] opacity-60" />
+                        <p>Ask AI to improve your report wording, fix grammar, or analyze errors.</p>
+                        <button
+                          type="button"
+                          onClick={() => setShowWorkspaceErrorInspector(true)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-semibold cursor-pointer hover:bg-amber-500/20"
+                        >
+                          <AlertCircle size={12} /> View Report Errors & Solutions
+                        </button>
+                      </div>
+                    ) : (
+                      aiMessages.map((m) => (
+                        <div key={m.id} className={`flex flex-col ${m.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                          <div className={`p-2.5 rounded-xl max-w-[90%] text-xs ${m.sender === 'user' ? 'bg-[var(--orange)] text-white' : 'bg-[var(--bg-panel)] border border-[var(--line)] text-[var(--text-soft)]'}`}>
+                            {m.text}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                    {isAiSending && (
+                      <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-1.5">
+                        <Sparkles size={13} className="animate-spin text-[var(--orange-3)]" />
+                        <span>AI assistant is analyzing document...</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Form input */}
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!aiChatInput.trim() || isAiSending) return;
+                      const msgText = aiChatInput.trim();
+                      const userMsg = { id: Date.now(), sender: 'user', text: msgText };
+                      setAiMessages((prev) => [...prev, userMsg]);
+                      setAiChatInput('');
+                      setIsAiSending(true);
+
+                      try {
+                        const selectedText = editor?.state.selection ? editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, ' ') : '';
+                        let responseText = '';
+                        if (reportId) {
+                          try {
+                            // Was posting to /ai/reports/:id/ask-assistant, a route that
+                            // does not exist - so every answer was the canned string below.
+                            const question = selectedText
+                              ? `${msgText}\n\nSelected passage from my report:\n"""${selectedText.slice(0, 2000)}"""`
+                              : msgText;
+                            const res = await api.post('/ai/writing-assistant', { question, reportId: Number(reportId) });
+                            if (res.data?.answer) responseText = res.data.answer;
+                          } catch (err) {
+                            responseText = err?.response?.data?.message
+                              || 'The writing assistant is unavailable right now. Please try again.';
+                          }
+                        } else {
+                          responseText = 'Open a saved report first — the writing assistant answers questions about a specific report.';
+                        }
+                        setAiMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: responseText }]);
+                      } finally {
+                        setIsAiSending(false);
+                      }
+                    }}
+                    className="flex gap-1.5 pt-2 border-t border-[var(--line)]"
+                  >
+                    <input
+                      value={aiChatInput}
+                      onChange={(e) => setAiChatInput(e.target.value)}
+                      placeholder="Ask AI writing assistant..."
+                      className="flex-1 rounded-lg border border-[var(--line)] px-2.5 py-1.5 text-xs bg-[var(--bg)] text-[var(--text)] focus:outline-none"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!aiChatInput.trim() || isAiSending}
+                      className="rounded-lg bg-[var(--orange)] px-3 py-1.5 text-white disabled:opacity-40 hover:opacity-90 transition cursor-pointer flex items-center justify-center"
+                    >
+                      <Send size={13} />
+                    </button>
+                  </form>
                 </div>
               )}
               {assistantTab === 'info' && (
@@ -1263,6 +1419,333 @@ export default function WritingWorkspace() {
         <span>Local document storage · Private by default</span>
         <span>Page {pageCount}</span>
       </footer>
+
+      {/* Expanded Error & Chatbot Inspector Modal Overlay on Page */}
+      {showWorkspaceErrorInspector && (() => {
+        const workspaceErrorItems = [
+          {
+            id: 1,
+            section: 'Specification Book',
+            category: 'Missing Requirements',
+            type: 'high',
+            originalText: 'The functional requirements section lacks formal use case descriptions and actor definitions.',
+            explanation: 'Academic standards require every functional requirement to explicitly detail primary actors, system preconditions, and standard/alternative workflows.',
+            suggestedAnswer: 'Add a dedicated section detailing Actors (Student, Academic Supervisor, Professional Supervisor) and formal UML Use Case Diagrams with detailed tabular specifications.'
+          },
+          {
+            id: 2,
+            section: 'Analysis & Conception',
+            category: 'Technical Terminology',
+            type: 'medium',
+            originalText: 'We used a database to save data.',
+            explanation: 'Informal terminology ("save data"). Formal academic reports require precise technical phrasing describing the architecture layer.',
+            suggestedAnswer: 'Replace with: "Data persistence is handled through a relational PostgreSQL engine using an ORM layer with full ACID transaction guarantees."'
+          },
+          {
+            id: 3,
+            section: 'Architecture & Implementation',
+            category: 'Component Diagram',
+            type: 'medium',
+            originalText: 'The backend calls the AI API directly in the component file.',
+            explanation: 'Violates separation of concerns. AI processing should be abstracted behind an API service module with error boundaries.',
+            suggestedAnswer: 'Abstract AI requests into a dedicated service layer (aiService.js) with structured error handling and rate-limiting.'
+          }
+        ];
+
+        return (
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-md flex flex-col z-50 p-4 md:p-6 overflow-hidden">
+            <div className="rounded-2xl border shadow-2xl w-full h-full flex flex-col overflow-hidden" style={{
+              backgroundColor: 'var(--bg-panel)',
+              borderColor: 'var(--line)',
+              color: 'var(--text)'
+            }}>
+              {/* Modal Header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b shrink-0" style={{ borderColor: 'var(--line)' }}>
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-400">
+                    <Brain size={24} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base md:text-lg font-bold text-orange-400">Writing Workspace AI Assistant & Section Inspector</h2>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                        Live Workspace View
+                      </span>
+                    </div>
+                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      Report Title: <strong>{title || 'Untitled Internship Report'}</strong> • {workspaceErrorItems.length} Identified Section Errors
+                    </p>
+                  </div>
+                </div>
+
+                {/* View Mode Toggle Controls */}
+                <div className="flex items-center gap-2 bg-[var(--bg)] p-1 rounded-xl border border-[var(--line)]">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedWorkspaceViewMode('split')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                      expandedWorkspaceViewMode === 'split'
+                        ? 'bg-orange-500 text-white shadow'
+                        : 'text-[var(--text-soft)] hover:text-[var(--text)]'
+                    }`}
+                  >
+                    <Split size={14} /> Split View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedWorkspaceViewMode('chat')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                      expandedWorkspaceViewMode === 'chat'
+                        ? 'bg-orange-500 text-white shadow'
+                        : 'text-[var(--text-soft)] hover:text-[var(--text)]'
+                    }`}
+                  >
+                    <MessageSquare size={14} /> Wide Chat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedWorkspaceViewMode('errors')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                      expandedWorkspaceViewMode === 'errors'
+                        ? 'bg-orange-500 text-white shadow'
+                        : 'text-[var(--text-soft)] hover:text-[var(--text)]'
+                    }`}
+                  >
+                    <AlertCircle size={14} /> Section Errors ({workspaceErrorItems.length})
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowWorkspaceErrorInspector(false)}
+                  className="p-2 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer border border-transparent hover:border-white/20"
+                  title="Exit expanded view"
+                >
+                  <Minimize2 size={20} />
+                </button>
+              </div>
+
+              {/* Modal Body Container */}
+              <div className="flex-1 min-h-0 p-4 md:p-6 overflow-hidden">
+                <div className={`h-full gap-6 overflow-hidden ${
+                  expandedWorkspaceViewMode === 'split' ? 'grid grid-cols-1 lg:grid-cols-2' : 'flex flex-col max-w-4xl mx-auto'
+                }`}>
+
+                  {/* ── LEFT PANE: WIDE CHATBOT STREAM ── */}
+                  {(expandedWorkspaceViewMode === 'split' || expandedWorkspaceViewMode === 'chat') && (
+                    <div className="flex flex-col h-full rounded-2xl border p-4 overflow-hidden relative" style={{
+                      borderColor: 'var(--line)',
+                      backgroundColor: 'var(--bg-card)'
+                    }}>
+                      <div className="flex items-center justify-between pb-3 border-b mb-3 shrink-0" style={{ borderColor: 'var(--line)' }}>
+                        <div className="flex items-center gap-2">
+                          <Sparkles size={16} className="text-orange-400" />
+                          <h3 className="text-sm font-bold" style={{ color: 'var(--text)' }}>AI Writing Assistant Conversation</h3>
+                        </div>
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-300 font-mono">
+                          {aiMessages.length} Messages
+                        </span>
+                      </div>
+
+                      {/* Chat Messages Stream */}
+                      <div className="flex-1 overflow-y-auto space-y-3.5 pr-2 text-xs">
+                        {aiMessages.length === 0 ? (
+                          <div className="text-center text-xs py-16 space-y-3" style={{ color: 'var(--text-muted)' }}>
+                            <Brain size={36} className="mx-auto opacity-50 text-orange-400" />
+                            <p className="font-semibold text-sm">AI Assistant Active in Workspace</p>
+                            <p>Ask AI to improve your report wording, fix grammar, or analyze errors in sections.</p>
+                          </div>
+                        ) : (
+                          aiMessages.map((m) => (
+                            <div key={m.id} className={`flex flex-col ${m.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                              <div
+                                className={`max-w-[85%] rounded-2xl p-4 leading-relaxed text-xs shadow-md ${
+                                  m.sender === 'user'
+                                    ? 'text-white rounded-br-none'
+                                    : 'border rounded-bl-none'
+                                }`}
+                                style={{
+                                  background: m.sender === 'user'
+                                    ? 'linear-gradient(135deg, var(--orange), var(--orange-3))'
+                                    : 'var(--bg-panel)',
+                                  borderColor: m.sender === 'user' ? 'transparent' : 'var(--line)',
+                                  color: m.sender === 'user' ? 'white' : 'var(--text-soft)'
+                                }}
+                              >
+                                <p className="whitespace-pre-wrap leading-relaxed">{m.text}</p>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                        {isAiSending && (
+                          <div className="flex items-center gap-2 text-[11px] px-2 py-1 text-orange-400 animate-pulse">
+                            <Sparkles size={15} className="animate-spin" />
+                            <span>AI assistant is analyzing document text...</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Input form */}
+                      <form
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          if (!aiChatInput.trim() || isAiSending) return;
+                          const msgText = aiChatInput.trim();
+                          const userMsg = { id: Date.now(), sender: 'user', text: msgText };
+                          setAiMessages((prev) => [...prev, userMsg]);
+                          setAiChatInput('');
+                          setIsAiSending(true);
+
+                          try {
+                            const selectedText = editor?.state.selection ? editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, ' ') : '';
+                            let responseText = '';
+                            if (reportId) {
+                              try {
+                                // Was posting to /ai/reports/:id/ask-assistant, a route that
+                                // does not exist - so every answer was the canned string below.
+                                const question = selectedText
+                                  ? `${msgText}\n\nSelected passage from my report:\n"""${selectedText.slice(0, 2000)}"""`
+                                  : msgText;
+                                const res = await api.post('/ai/writing-assistant', { question, reportId: Number(reportId) });
+                                if (res.data?.answer) responseText = res.data.answer;
+                              } catch (err) {
+                                responseText = err?.response?.data?.message
+                                  || 'The writing assistant is unavailable right now. Please try again.';
+                              }
+                            } else {
+                              responseText = 'Open a saved report first — the writing assistant answers questions about a specific report.';
+                            }
+                            setAiMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: responseText }]);
+                          } finally {
+                            setIsAiSending(false);
+                          }
+                        }}
+                        className="flex gap-2 pt-3 border-t mt-3 shrink-0" style={{ borderColor: 'var(--line)' }}
+                      >
+                        <input
+                          value={aiChatInput}
+                          onChange={(e) => setAiChatInput(e.target.value)}
+                          placeholder="Ask AI writing assistant..."
+                          className="flex-1 rounded-xl border px-4 py-3 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+                          style={{
+                            borderColor: 'var(--line)',
+                            backgroundColor: 'var(--bg)',
+                            color: 'var(--text)'
+                          }}
+                        />
+                        <button
+                          type="submit"
+                          disabled={!aiChatInput.trim() || isAiSending}
+                          className="rounded-xl px-5 py-3 text-white font-semibold text-xs hover:opacity-90 disabled:opacity-40 transition cursor-pointer flex items-center gap-2 shadow-lg"
+                          style={{ backgroundColor: 'var(--orange)' }}
+                        >
+                          <Send size={16} />
+                          <span>Send</span>
+                        </button>
+                      </form>
+                    </div>
+                  )}
+
+                  {/* ── RIGHT PANE: SECTION ERRORS & FIXES ── */}
+                  {(expandedWorkspaceViewMode === 'split' || expandedWorkspaceViewMode === 'errors') && (
+                    <div className="flex flex-col h-full rounded-2xl border p-4 overflow-hidden" style={{
+                      borderColor: 'var(--line)',
+                      backgroundColor: 'var(--bg-card)'
+                    }}>
+                      <div className="flex items-center justify-between pb-3 border-b mb-3 shrink-0" style={{ borderColor: 'var(--line)' }}>
+                        <div className="flex items-center gap-2">
+                          <AlertCircle size={16} className="text-amber-400" />
+                          <h3 className="text-sm font-bold text-amber-300">Detected Section Errors & Solutions</h3>
+                        </div>
+                        <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono font-bold border border-amber-500/30">
+                          {workspaceErrorItems.length} Issues Found
+                        </span>
+                      </div>
+
+                      {/* Scrollable Error Cards */}
+                      <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+                        {workspaceErrorItems.map((item) => (
+                          <div
+                            key={item.id}
+                            className="rounded-xl border p-4 text-xs transition space-y-3 hover:border-amber-500/40"
+                            style={{ borderColor: 'var(--line)', backgroundColor: 'var(--bg-panel)' }}
+                          >
+                            {/* Section Header */}
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <span className="text-[11px] px-3 py-1 rounded-full font-mono font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                Section: {item.section} • {item.category}
+                              </span>
+                              <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase ${
+                                item.type === 'high' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                              }`}>
+                                {item.type} priority
+                              </span>
+                            </div>
+
+                            {/* Exact Error */}
+                            <div className="rounded-xl p-3.5 bg-rose-500/10 border border-rose-500/20 text-rose-200">
+                              <strong className="block text-[10px] text-rose-400 uppercase tracking-wider mb-1 flex items-center gap-1.5 font-bold">
+                                <AlertTriangle size={14} /> Exact Error / Problematic Passage:
+                              </strong>
+                              <p className="font-mono text-xs leading-relaxed">"{item.originalText}"</p>
+                            </div>
+
+                            {/* Detailed Explanation */}
+                            <div className="rounded-xl p-3.5 bg-white/5 border border-white/10 text-[var(--text-soft)]">
+                              <strong className="block text-[10px] text-amber-400 uppercase tracking-wider mb-1 flex items-center gap-1.5 font-bold">
+                                <Lightbulb size={14} /> Detailed Explanation:
+                              </strong>
+                              <p className="leading-relaxed text-xs">{item.explanation}</p>
+                            </div>
+
+                            {/* Suggested Answer */}
+                            {item.suggestedAnswer && (
+                              <div className="rounded-xl p-3.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-200 space-y-2.5">
+                                <div className="flex items-center justify-between flex-wrap gap-2">
+                                  <strong className="text-[10px] text-emerald-400 uppercase tracking-wider flex items-center gap-1.5 font-bold">
+                                    <CheckCircle2 size={14} /> Suggested Answer & Corrected Version:
+                                  </strong>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(item.suggestedAnswer);
+                                        setAiCopiedId(item.id);
+                                        setTimeout(() => setAiCopiedId(null), 2000);
+                                      }}
+                                      className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center gap-1 cursor-pointer transition border border-emerald-500/30"
+                                    >
+                                      <Copy size={13} /> {aiCopiedId === item.id ? 'Copied!' : 'Copy Fix'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setAiChatInput(`How do I fix this error in ${item.section}: "${item.originalText}"?`);
+                                        if (expandedWorkspaceViewMode === 'errors') setExpandedWorkspaceViewMode('split');
+                                      }}
+                                      className="px-2.5 py-1 rounded-lg bg-orange-500/20 hover:bg-orange-500/40 text-orange-300 text-xs font-semibold flex items-center gap-1 cursor-pointer transition border border-orange-500/30"
+                                    >
+                                      <Sparkles size={13} /> Ask AI in Chat
+                                    </button>
+                                  </div>
+                                </div>
+                                <p className="font-mono text-xs bg-black/40 p-3 rounded-lg border border-emerald-500/20 select-all leading-relaxed">
+                                  {item.suggestedAnswer}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </main>
   )
 }
