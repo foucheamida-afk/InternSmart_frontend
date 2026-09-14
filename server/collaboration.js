@@ -101,38 +101,43 @@ const server = new Server({
 
   // Server-side read-only enforcement for supervisors (suggest-only policy).
   //
-  // STATUS: PARTIAL - writes are blocked, but this also breaks live reading.
+  // STATUS: NOT SUFFICIENT - do not treat suggest-only as enforced. Verified state:
+  //   - read-only peer receives live edits ............ YES
+  //   - its ordinary writes are refused .............. YES (student doc stayed clean)
+  //   - server survives the rejection ................ YES
+  //   - it keeps receiving AFTER a refused write ..... NO  (replica diverges and
+  //     stops updating: supervisor saw "AAA | SUPERVISOR EDIT" while the student
+  //     had "AAA BBB")
+  //   - BYPASSABLE ................................... YES. SyncStep2 must be allowed
+  //     for broadcasts to work, so a read-only client can push edits inside its
+  //     (re)connect handshake anyway.
   //
-  // Verified by test (two clients against a scratch database):
-  //   - supervisor write blocked ................ YES (student doc stayed clean)
-  //   - server survives the rejection ........... YES
-  //   - supervisor receives live edits .......... NO  <-- regression
+  // Attempts, because each failure was informative:
+  //   1. Throwing from `onChange` kills the process (unhandled rejection).
+  //   2. Filtering in `beforeHandleMessage` is a no-op: that payload has no
+  //      `messageType` field, so the comparison never matched.
+  //   3. Refusing SyncStep2 + Update blocked writes but also cut the peer off from
+  //      broadcasts entirely.
+  //   4. Refusing only Update (current) restores reading but leaves a diverged
+  //      replica after a rejected write, and is still bypassable via the handshake.
   //
-  // History of attempts, because each failure was instructive:
-  //   1. Throwing from `onChange` does not reject a change - Hocuspocus logs it and
-  //      the rejection becomes an unhandled error that kills the process.
-  //   2. Filtering in `beforeHandleMessage` did nothing: that payload has NO
-  //      `messageType` field (context/update/connection only), so the comparison was
-  //      always false and every message passed.
-  //   3. Rejecting BOTH SyncStep2 (1) and Update (2) here blocks writes but also
-  //      stops the peer receiving broadcasts - the connection appears to be excluded
-  //      from the broadcast set until its handshake completes.
-  //
-  // NEXT STEP (not yet applied or tested): reject only the incremental Update (2)
-  // and allow SyncStep2 (1), so the handshake completes and read-only peers keep
-  // receiving live edits while their own mutations are still refused.
-  //
-  // Until this is finished, do NOT treat the suggest-only policy as enforced.
+  // CONCLUSION: a writable CRDT replica cannot be made read-only from the hook layer
+  // in a way that is both safe and functional. The correct design for the
+  // suggest-only policy is to treat suggestions as DATA rather than document
+  // mutations: a ReportSuggestion record (author, anchored range, proposed text,
+  // status) that the student accepts or rejects, rendered as a review layer. That
+  // gives real track-changes semantics and an audit trail, and supervisors never
+  // need a writable replica at all. Until then, supervisors must be given a
+  // read-only view that does not join the writable document.
   async beforeSync({ context, type, messageType }) {
     if (!context?.readOnly) return;
 
     // Tolerate either field name across Hocuspocus versions.
     const syncType = type ?? messageType;
 
-    const SYNC_STEP_2 = 1; // peer's document payload (handshake)
-    const SYNC_UPDATE = 2; // incremental update
+    const SYNC_UPDATE = 2; // incremental document update
 
-    if (syncType === SYNC_STEP_2 || syncType === SYNC_UPDATE) {
+    if (syncType === SYNC_UPDATE) {
       throw new Error("Read-only connection: submit suggestions instead of editing");
     }
   },
