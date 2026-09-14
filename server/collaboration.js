@@ -101,30 +101,38 @@ const server = new Server({
 
   // Server-side read-only enforcement for supervisors (suggest-only policy).
   //
-  // STATUS: NOT WORKING — do not rely on this yet. Both attempts are recorded
-  // because each is instructive:
+  // STATUS: PARTIAL - writes are blocked, but this also breaks live reading.
   //
-  //   1. Throwing from `onChange` does not reject a change. Hocuspocus logs it and
-  //      the rejection surfaces as an unhandled error that kills the process
-  //      (observed: exit code 1 immediately after the first read-only write).
-  //   2. Filtering inbound Sync / SyncReply here did NOT stop the update either —
-  //      in testing a supervisor's edit still reached the student's document
-  //      ("STUDENT WRITES THIS | SUPERVISOR EDIT"), so incremental updates clearly
-  //      do not arrive under those message types. The rejection itself is clean
-  //      (the server stayed up), it simply does not cover the update path.
+  // Verified by test (two clients against a scratch database):
+  //   - supervisor write blocked ................ YES (student doc stayed clean)
+  //   - server survives the rejection ........... YES
+  //   - supervisor receives live edits .......... NO  <-- regression
   //
-  // Consequence: until this is solved, treat supervisors as ABLE TO EDIT. The
-  // client marks them read-only, but that is presentation, not enforcement. The
-  // likely correct fix is to inspect the decoded update payload (or the document
-  // transaction origin) rather than the message type, or to give supervisors a
-  // non-writable replica and persist their input as a separate suggestion layer.
-  async beforeHandleMessage({ context, messageType }) {
+  // History of attempts, because each failure was instructive:
+  //   1. Throwing from `onChange` does not reject a change - Hocuspocus logs it and
+  //      the rejection becomes an unhandled error that kills the process.
+  //   2. Filtering in `beforeHandleMessage` did nothing: that payload has NO
+  //      `messageType` field (context/update/connection only), so the comparison was
+  //      always false and every message passed.
+  //   3. Rejecting BOTH SyncStep2 (1) and Update (2) here blocks writes but also
+  //      stops the peer receiving broadcasts - the connection appears to be excluded
+  //      from the broadcast set until its handshake completes.
+  //
+  // NEXT STEP (not yet applied or tested): reject only the incremental Update (2)
+  // and allow SyncStep2 (1), so the handshake completes and read-only peers keep
+  // receiving live edits while their own mutations are still refused.
+  //
+  // Until this is finished, do NOT treat the suggest-only policy as enforced.
+  async beforeSync({ context, type, messageType }) {
     if (!context?.readOnly) return;
 
-    const MESSAGE_TYPE_SYNC = 0;
-    const MESSAGE_TYPE_SYNC_REPLY = 4;
+    // Tolerate either field name across Hocuspocus versions.
+    const syncType = type ?? messageType;
 
-    if (messageType === MESSAGE_TYPE_SYNC || messageType === MESSAGE_TYPE_SYNC_REPLY) {
+    const SYNC_STEP_2 = 1; // peer's document payload (handshake)
+    const SYNC_UPDATE = 2; // incremental update
+
+    if (syncType === SYNC_STEP_2 || syncType === SYNC_UPDATE) {
       throw new Error("Read-only connection: submit suggestions instead of editing");
     }
   },
