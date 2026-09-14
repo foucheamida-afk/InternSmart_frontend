@@ -1,2 +1,9 @@
 node_modules/
 .env
+
+# Uploaded student documents (report PDFs, CSV rosters) are user data and must
+# not enter version control. They live only on the server filesystem.
+server/uploads/
+
+# Local database dumps / scratch artefacts
+*.sql
