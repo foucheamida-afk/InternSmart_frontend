@@ -66,6 +66,26 @@ const User = sequelize.define("User", {
     type: DataTypes.DATE,
     allowNull: true,
   },
+
+  // Password-reset one-time code.
+  // The 6-digit code is stored only as a bcrypt hash, so someone with read access
+  // to this table cannot use the value directly. otpAttempts caps brute-force
+  // guessing and the CPU cost of repeated bcrypt comparisons.
+  otpCode: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+
+  otpExpires: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+
+  otpAttempts: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+  },
 });
 
 export default User;

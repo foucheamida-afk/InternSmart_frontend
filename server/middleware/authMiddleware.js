@@ -3,11 +3,7 @@ import User from "../models/userModel.js";
 
 const protect = async (req, res, next) => {
   try {
-    console.log("AUTH MIDDLEWARE REACHED");
-
     const authHeader = req.headers.authorization;
-
-    console.log("AUTH HEADER:", authHeader);
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).json({
@@ -17,21 +13,25 @@ const protect = async (req, res, next) => {
 
     const token = authHeader.split(" ")[1];
 
-    console.log("TOKEN RECEIVED:", token ? "YES" : "NO");
-
     const decoded = jwt.verify(
       token,
       process.env.JWT_SECRET
     );
 
+    // Purpose-scoped tokens (password reset) are signed with a derived secret and
+    // are not access tokens. Reject them explicitly as a second line of defence.
+    if (decoded.purpose) {
+      return res.status(401).json({
+        message: "Invalid or expired token",
+      });
+    }
+
     const user = await User.findByPk(decoded.id, { attributes: ["id", "active", "role"] });
-    if (!user || !user.active) {
+    if (!user || user.active === false) {
       return res.status(403).json({
         message: "This account has been deactivated. Please contact your administrator.",
       });
     }
-
-    console.log("TOKEN VERIFIED:", decoded);
 
     req.user = { ...decoded, role: user.role };
 

@@ -36,6 +36,10 @@ const sendAccountEmail = async ({ to, name, password, role }) => {
 
   const subject = "Your InternSmart Account Has Been Created";
 
+  // Configurable so credential emails point at the deployed portal instead of
+  // localhost. Read lazily so it reflects the loaded .env.
+  const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
       <h2 style="color: #2c3e50;">Welcome to InternSmart</h2>
@@ -44,7 +48,7 @@ const sendAccountEmail = async ({ to, name, password, role }) => {
       <p><strong>Email:</strong> ${to}</p>
       <p><strong>Temporary Password:</strong> <code style="background: #f4f4f4; padding: 4px 8px; border-radius: 4px;">${password}</code></p>
       <p style="color: #e74c3c;"><strong>Important:</strong> You are required to change this password upon your first login.</p>
-      <p>Please log in at: <a href="http://localhost:5173" style="color: #3498db;">InternSmart Portal</a></p>
+      <p>Please log in at: <a href="${clientUrl}" style="color: #3498db;">InternSmart Portal</a></p>
       <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
       <p style="font-size: 12px; color: #888;">If you did not expect this email, please contact your administrator.</p>
     </div>
@@ -62,7 +66,7 @@ Temporary Password: ${password}
 
 Important: You are required to change this password upon your first login.
 
-Please log in at: http://localhost:5173
+Please log in at: ${clientUrl}
 
 If you did not expect this email, please contact your administrator.
   `;
@@ -106,6 +110,35 @@ Please log in to InternSmart for more details.
       <p>${message}</p>
       <p><strong>Defense date:</strong> ${formattedDate}</p>
       <p>Please log in to InternSmart for more details.</p>
+    </div>
+  `;
+
+  return transporter.sendMail({ from: EMAIL_FROM, to, subject, text, html });
+};
+
+export const sendPasswordResetEmail = async ({ to, name, code, expiresInMinutes = 15 }) => {
+  if (!EMAIL_USER || !EMAIL_PASS || !EMAIL_FROM) {
+    throw new Error("Email service is not configured on the server.");
+  }
+
+  const subject = "Your InternSmart Password Reset Code";
+  const text = `
+InternSmart - Password Reset
+
+Hello ${name},
+
+Your password reset code is: ${code}
+
+This code expires in ${expiresInMinutes} minutes. If you did not request a password reset you can ignore this email - your password has not been changed.
+  `;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+      <h2 style="color: #2c3e50;">Password Reset</h2>
+      <p>Hello <strong>${name}</strong>,</p>
+      <p>Use the code below to reset your InternSmart password:</p>
+      <p style="font-size: 28px; letter-spacing: 6px; font-weight: bold; background: #f4f4f4; padding: 12px 16px; border-radius: 8px; display: inline-block;">${code}</p>
+      <p>This code expires in <strong>${expiresInMinutes} minutes</strong>.</p>
+      <p style="color: #e74c3c;">If you did not request a password reset you can ignore this email - your password has not been changed.</p>
     </div>
   `;
 

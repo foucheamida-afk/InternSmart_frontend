@@ -200,7 +200,28 @@ const ensureUserStatusColumns = async () => {
       console.log(`Added missing Users.${name} column`);
     }
   }
+
+  await sequelize.query("UPDATE Users SET active = 1 WHERE active IS NULL;").catch(() => {});
 };
+
+// The password-reset OTP columns were added after the Users table was first created.
+const ensureUserOtpColumns = async () => {
+  const queryInterface = sequelize.getQueryInterface();
+  const columns = await queryInterface.describeTable("Users");
+  const missingColumns = {
+    otpCode: { type: DataTypes.STRING, allowNull: true },
+    otpExpires: { type: DataTypes.DATE, allowNull: true },
+    otpAttempts: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+  };
+
+  for (const [name, definition] of Object.entries(missingColumns)) {
+    if (!columns[name]) {
+      await queryInterface.addColumn("Users", name, definition);
+      console.log(`Added missing Users.${name} column`);
+    }
+  }
+};
+
 const ensureStudentAiColumns = async () => {
   const queryInterface = sequelize.getQueryInterface();
   const columns = await queryInterface.describeTable("Students");
@@ -211,6 +232,15 @@ const ensureStudentAiColumns = async () => {
   if (!columns.aiRequestsDate) {
     await queryInterface.addColumn("Students", "aiRequestsDate", { type: DataTypes.DATEONLY, allowNull: true });
     console.log("Added Students.aiRequestsDate column");
+  }
+};
+
+const ensureNotificationColumns = async () => {
+  const queryInterface = sequelize.getQueryInterface();
+  const columns = await queryInterface.describeTable("Notifications");
+  if (!columns.meetingLink) {
+    await queryInterface.addColumn("Notifications", "meetingLink", { type: DataTypes.STRING, allowNull: true });
+    console.log("Added Notifications.meetingLink column");
   }
 };
 app.use(cors());
@@ -231,24 +261,34 @@ app.use("/api/meetings", meetingRoutes);
 app.use("/api/timeline", timelineRoutes);
 app.use("/api/workspace", reportWorkspaceRoutes);
 
-app.listen(3000, async () => {
+const PORT = Number(process.env.PORT) || 3000;
+
+app.listen(PORT, async () => {
   try {
     await connectDB();
+
+    // Create any missing tables FIRST. The ensure*Columns helpers below call
+    // describeTable() on tables they assume already exist, so against a fresh
+    // database they threw ("No description found for \"Tasks\" table") before
+    // sync() ever ran and the server could not bootstrap at all. Running sync()
+    // first is safe for existing databases too: with force:false it leaves
+    // existing tables untouched, and the helpers still add any missing columns.
+    await sequelize.sync({
+      force: false
+    });
 
     await ensureTaskColumns();
     await ensureReportWorkspaceColumn();
     await ensureReportAiColumns();
     await ensureStudentAiColumns();
+    await ensureNotificationColumns();
     await ensureInternshipColumns();
     await ensureInternshipProfessionalSupervisorColumn();
     await ensureMeetingGroupColumns();
     await ensureTaskFeedbackColumns();
     await ensureInternshipGradeColumns();
     await ensureUserStatusColumns();
-
-    await sequelize.sync({
-      force: false
-    });
+    await ensureUserOtpColumns();
 
     const emailUser = process.env.EMAIL_USER;
     const emailPass = process.env.EMAIL_PASS;
@@ -264,8 +304,10 @@ app.listen(3000, async () => {
       }
     }
 
-    console.log("Server is running on port 3000");
+    console.log(`Server is running on port ${PORT}`);
   } catch (error) {
     console.error("Server startup error:", error);
   }
 });
+
+export { app };

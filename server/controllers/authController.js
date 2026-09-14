@@ -1,6 +1,6 @@
 import User from "../models/userModel.js";
 import bcrypt from "bcrypt";
-import generateToken from "../utils/generatejwt.js";
+import generateToken from "../utils/generateJWT.js";
 
 const login = async (req, res) => {
   try {

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { getStoredToken, getStoredUser, setStoredAuth } from "../utils/storage";
 import {
   Lock,
   Check,
@@ -20,30 +21,38 @@ const ChangePassword = () => {
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Live password requirements
-  const passwordRules = {
-    minLength: values.newPassword.length >= 6,
-    uppercase: /[A-Z]/.test(values.newPassword),
-    lowercase: /[a-z]/.test(values.newPassword),
-    number: /\d/.test(values.newPassword),
-    special: /[!@#$%^&*]/.test(values.newPassword),
-  };
+  const passwordRequirements = [
+    {
+      label: "At least 8 characters long",
+      test: (p) => p.length >= 8,
+    },
+    {
+      label: "Contains at least one uppercase letter",
+      test: (p) => /[A-Z]/.test(p),
+    },
+    {
+      label: "Contains at least one lowercase letter",
+      test: (p) => /[a-z]/.test(p),
+    },
+    {
+      label: "Contains at least one number",
+      test: (p) => /[0-9]/.test(p),
+    },
+    {
+      label: "Contains at least one special character (!@#$%^&*)",
+      test: (p) => /[!@#$%^&*(),.?":{}|<>]/.test(p),
+    },
+  ];
 
-  const passwordIsValid =
-    passwordRules.minLength &&
-    passwordRules.uppercase &&
-    passwordRules.lowercase &&
-    passwordRules.number &&
-    passwordRules.special;
+  const passwordIsValid = passwordRequirements.every(
+    (req) => req.test(values.newPassword)
+  );
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
-
-    setValues((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-
+    setValues({
+      ...values,
+      [e.target.name]: e.target.value,
+    });
     setError("");
     setSuccess("");
   };
@@ -54,7 +63,7 @@ const ChangePassword = () => {
     setError("");
     setSuccess("");
 
-    const token = localStorage.getItem("token");
+    const token = getStoredToken();
 
     // Check token
     if (!token) {
@@ -133,31 +142,24 @@ const ChangePassword = () => {
       );
 
       // Update local user information
-      const user = JSON.parse(
-        localStorage.getItem("user")
-      );
+      const user = getStoredUser();
 
       if (user) {
         user.mustChangePassword = false;
 
-        localStorage.setItem(
-          "user",
-          JSON.stringify(user)
-        );
+        setStoredAuth(user, token);
       }
 
       // Redirect after successful change
       setTimeout(() => {
-        const user = JSON.parse(
-          localStorage.getItem("user")
-        );
+        const user = getStoredUser();
 
         switch (user?.role) {
           case "student":
             navigate("/student/dashboard");
             break;
 
-            case "academic_supervisor":
+          case "academic_supervisor":
               navigate(
                 "/supervisor"
               );
@@ -240,7 +242,7 @@ const ChangePassword = () => {
 
           {/* Error */}
           {error && (
-            <div className="mb-5 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+            <div className="mb-5 flex items-start gap-2 rounded-xl border border-red-200 bg-black p-3 text-sm text-white">
 
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
 
@@ -330,45 +332,17 @@ const ChangePassword = () => {
 
                 <div className="space-y-2">
 
-                  <Requirement
-                    valid={
-                      passwordRules.minLength
-                    }
-                  >
-                    At least 6 characters
-                  </Requirement>
-
-                  <Requirement
-                    valid={
-                      passwordRules.uppercase
-                    }
-                  >
-                    At least one uppercase letter
-                  </Requirement>
-
-                  <Requirement
-                    valid={
-                      passwordRules.lowercase
-                    }
-                  >
-                    At least one lowercase letter
-                  </Requirement>
-
-                  <Requirement
-                    valid={
-                      passwordRules.number
-                    }
-                  >
-                    At least one number
-                  </Requirement>
-
-                  <Requirement
-                    valid={
-                      passwordRules.special
-                    }
-                  >
-                    At least one special character
-                  </Requirement>
+                  {/* Rendered from the single requirements array above.
+                      Previously read from an undefined `passwordRules` object,
+                      which threw a ReferenceError and blanked this screen. */}
+                  {passwordRequirements.map((req) => (
+                    <Requirement
+                      key={req.label}
+                      valid={req.test(values.newPassword)}
+                    >
+                      {req.label}
+                    </Requirement>
+                  ))}
 
                 </div>
 

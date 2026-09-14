@@ -1,7 +1,10 @@
 import axios from "axios";
+import { getStoredToken, clearStoredAuth } from "../utils/storage";
 
 const api = axios.create({
-  baseURL: "http://localhost:3000/api",
+  // Configurable per environment; VITE_API_URL is optional and falls back to the
+  // original local value so existing setups keep working unchanged.
+  baseURL: import.meta.env.VITE_API_URL || "http://localhost:3000/api",
   headers: {
     "Content-Type": "application/json",
   },
@@ -9,7 +12,7 @@ const api = axios.create({
 
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("token");
+    const token = getStoredToken();
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -31,8 +34,7 @@ api.interceptors.response.use(
       const isAuthPage = ["/login", "/", "/change-password"].includes(window.location.pathname);
 
       if (!isAuthPage) {
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
+        clearStoredAuth();
         window.dispatchEvent(new Event("auth:logout"));
         window.location.assign("/login");
       }

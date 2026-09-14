@@ -12,62 +12,83 @@ import path from "path";
 import { extractTextFromPDF } from "../services/pdfService.js";
 import { generateGeminiResponse } from "../services/geminiService.js";
 import { buildReportReviewPrompt } from "../prompts/reportReviewPrompt.js";
-import { consumeAiRequest } from "../utils/aiQuota.js";
+import { consumeAiRequest, refundAiRequest } from "../utils/aiQuota.js";
+
+const getOrCreateStudent = async (userId) => {
+  let student = await Student.findOne({ where: { userId } });
+  if (!student) {
+    const user = await User.findByPk(userId);
+    if (user && user.role === "student") {
+      student = await Student.create({
+        userId: user.id,
+        matricule: `STU-${user.id}`,
+        class: "General",
+      });
+    }
+  }
+  return student;
+};
 
 const getMyProfile = async (req, res) => {
   try {
-    // ID comes from the JWT
     const userId = req.user.id;
-
-    // Find the logged-in student
-    const student = await Student.findOne({
-      where: {
-        userId: userId,
-      },
-
+    let student = await Student.findOne({
+      where: { userId },
       include: [
         {
           model: User,
           as: "user",
-          attributes: [
-            "id",
-            "name",
-            "email",
-            "role",
-          ],
+          attributes: ["id", "name", "email", "role"],
         },
-
         {
           model: Internship,
           as: "internship",
-
           include: [
             {
               model: User,
               as: "academicSupervisor",
-              attributes: [
-                "id",
-                "name",
-                "email",
-                "role",
-              ],
+              attributes: ["id", "name", "email", "role"],
             },
             {
               model: User,
               as: "professionalSupervisor",
-              attributes: [
-                "id",
-                "name",
-                "email",
-                "role",
-              ],
+              attributes: ["id", "name", "email", "role"],
             },
           ],
         },
       ],
     });
 
-    // Student doesn't exist
+    if (!student) {
+      await getOrCreateStudent(userId);
+      student = await Student.findOne({
+        where: { userId },
+        include: [
+          {
+            model: User,
+            as: "user",
+            attributes: ["id", "name", "email", "role"],
+          },
+          {
+            model: Internship,
+            as: "internship",
+            include: [
+              {
+                model: User,
+                as: "academicSupervisor",
+                attributes: ["id", "name", "email", "role"],
+              },
+              {
+                model: User,
+                as: "professionalSupervisor",
+                attributes: ["id", "name", "email", "role"],
+              },
+            ],
+          },
+        ],
+      });
+    }
+
     if (!student) {
       return res.status(404).json({
         message: "Student profile not found",
@@ -198,13 +219,11 @@ const submitReport = async (req, res) => {
 
 const deleteReport = async (req, res) => {
   try {
-    const student = await Student.findOne({ where: { userId: req.user.id } });
+    const student = await getOrCreateStudent(req.user.id);
     if (!student) return res.status(404).json({ message: "Student profile not found" });
 
     const report = await Report.findOne({ where: { id: req.params.id, studentId: student.id } });
     if (!report) return res.status(404).json({ message: "Report not found" });
-
-    const quota = await consumeAiRequest(student);
 
     await report.destroy();
     return res.status(200).json({ message: "Report deleted successfully" });
@@ -262,10 +281,10 @@ const sendReportToAi = async (req, res) => {
     const report = await Report.findOne({ where: { id: req.params.id, studentId: student.id } });
     if (!report) return res.status(404).json({ message: "Report not found" });
 
-    // Mark as in-progress immediately so the UI can reflect it
-    await report.update({ status: "ai_analysis", progress: Math.max(report.progress || 0, 20) });
-
-    // --- Read the PDF file from disk and extract text ---
+    // --- Read the PDF file from disk and extract text FIRST ---
+    // Extraction now happens before any state change or quota charge, so a PDF
+    // whose text cannot be read costs the student nothing and leaves the report
+    // exactly as it was.
     let pdfText = null;
     if (report.fileUrl) {
       try {
@@ -282,16 +301,40 @@ const sendReportToAi = async (req, res) => {
     }
 
     if (!pdfText) {
-      // No text available — return current state without AI analysis
       return res.status(200).json({
-        message: "Report marked for AI analysis. Unable to extract PDF text — please ensure the PDF contains selectable text.",
+        message: "Unable to extract text from this PDF — please ensure it contains selectable text. No AI request was used.",
         report,
       });
     }
 
+    // --- Enforce the daily quota BEFORE touching report state ---
+    // Charging first means a quota rejection cannot leave the report mid-flight.
+    const quota = await consumeAiRequest(student);
+
+    // Remember the prior state so a failed AI call can be undone.
+    const previousState = { status: report.status, progress: report.progress };
+
+    // Mark as in-progress so the UI can reflect it
+    await report.update({ status: "ai_analysis", progress: Math.max(report.progress || 0, 20) });
+
     // --- Call Gemini ---
     const prompt = buildReportReviewPrompt(pdfText);
-    const rawResponse = await generateGeminiResponse(prompt);
+
+    let rawResponse;
+    try {
+      rawResponse = await generateGeminiResponse(prompt);
+    } catch (aiError) {
+      // Restore the report and refund the request: a failed attempt must not
+      // consume the daily allowance or strand the report in "ai_analysis".
+      await report.update({ status: previousState.status, progress: previousState.progress });
+      const refunded = await refundAiRequest(student);
+      console.error("AI ANALYSIS FAILED (state restored, quota refunded):", aiError.message);
+      return res.status(aiError.statusCode || 500).json({
+        message: aiError.message || "Unable to send report to AI",
+        report,
+        ...(refunded ? { quota: refunded } : {}),
+      });
+    }
 
     // Strip markdown fences if any
     const cleaned = rawResponse
@@ -304,9 +347,13 @@ const sendReportToAi = async (req, res) => {
       review = JSON.parse(cleaned);
     } catch {
       console.error("Gemini response was not valid JSON:", cleaned.slice(0, 300));
+      // The AI produced nothing usable, so undo the state change and refund the request.
+      await report.update({ status: previousState.status, progress: previousState.progress });
+      const refunded = await refundAiRequest(student);
       return res.status(200).json({
-        message: "AI analysis ran but the response could not be parsed. Please try again.",
+        message: "AI analysis ran but the response could not be parsed. Your daily request has been refunded — please try again.",
         report,
+        ...(refunded ? { quota: refunded } : {}),
       });
     }
 
@@ -578,9 +625,12 @@ const submitTask = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
-    const { submissionNote } = req.body;
+    const { submissionNote, workUrl } = req.body;
 
-    const student = await Student.findOne({ where: { userId } });
+    const student = await Student.findOne({
+      where: { userId },
+      include: [{ model: User, as: "user", attributes: ["name", "email"] }],
+    });
     if (!student) {
       return res.status(404).json({ message: "Student profile not found" });
     }
@@ -591,14 +641,36 @@ const submitTask = async (req, res) => {
     }
 
     await task.update({
-      status: "completed",
-      completed: true,
+      status: "submitted",
+      completed: false,
       progress: 100,
       submittedAt: new Date(),
-      submissionNote: submissionNote || null,
+      submissionNote: submissionNote ? submissionNote.trim() : null,
+      workUrl: workUrl ? workUrl.trim() : null,
     });
 
-    return res.status(200).json({ message: "Task submitted successfully", task });
+    // Notify Supervisor(s)
+    const studentName = student.user?.name || "Student";
+    const notifySupervisorIds = new Set();
+    if (task.supervisorId) notifySupervisorIds.add(task.supervisorId);
+
+    // Also check internship assignment for both Academic & Professional Supervisors
+    const internship = await Internship.findOne({ where: { studentId: student.id } });
+    if (internship) {
+      if (internship.academicSupervisorId) notifySupervisorIds.add(internship.academicSupervisorId);
+      if (internship.professionalSupervisorId) notifySupervisorIds.add(internship.professionalSupervisorId);
+    }
+
+    for (const supervisorId of notifySupervisorIds) {
+      await Notification.create({
+        userId: supervisorId,
+        title: "Task Submitted for Review",
+        message: `${studentName} submitted work for task: "${task.title}". Please inspect and review.`,
+        type: "info",
+      }).catch((err) => console.error("Notification creation error:", err));
+    }
+
+    return res.status(200).json({ message: "Task submitted successfully to supervisor for review", task });
   } catch (error) {
     console.error("SUBMIT TASK ERROR:", error);
     return res.status(500).json({ message: "Server error", error: error.message });

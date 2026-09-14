@@ -7,6 +7,8 @@ import Report from "../models/reportModel.js";
 import Meeting from "../models/meetingModel.js";
 import Notification from "../models/notificationModel.js";
 import DefenseAlert from "../models/defenseAlertModel.js";
+import Task from "../models/taskModel.js";
+import ReportComment from "../models/reportCommentModel.js";
 import bcrypt from "bcrypt";
 import generateTemporaryPassword from "../utils/generatePassword.js";
 import sendAccountEmail, { sendDefenseAlertEmail } from "../utils/sendEmail.js";
@@ -302,7 +304,82 @@ export const deleteUser = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    await user.destroy();
+    // All cleanup runs in a single transaction. Previously each statement
+    // committed independently, so a failure part-way through left the earlier
+    // deletes committed - i.e. orphaned records (NFR-REL-02/03).
+    await sequelize.transaction(async (t) => {
+      // 1. If user is a student (or has a Student record)
+      const student = await Student.findOne({ where: { userId: user.id }, transaction: t });
+      if (student) {
+        const reports = await Report.findAll({ where: { studentId: student.id }, transaction: t });
+        for (const r of reports) {
+          await ReportComment.destroy({ where: { reportId: r.id }, transaction: t });
+        }
+        await Report.destroy({ where: { studentId: student.id }, transaction: t });
+        await Internship.destroy({ where: { studentId: student.id }, transaction: t });
+        await Meeting.destroy({ where: { studentId: student.id }, transaction: t });
+        await Task.destroy({ where: { studentId: student.id }, transaction: t });
+        await DefenseAlert.destroy({ where: { studentId: student.id }, transaction: t });
+        await student.destroy({ transaction: t });
+
+        // Clean up group meetings where the student is listed in the studentIds
+        // array. MariaDB implements JSON as LONGTEXT, so Sequelize can hand this
+        // column back as a raw string (e.g. "[1]") instead of an array - the
+        // previous Array.isArray() check was therefore always false and every
+        // group meeting kept a dangling student reference.
+        const groupMeetings = await Meeting.findAll({ where: { isGroupMeeting: true }, transaction: t });
+        for (const m of groupMeetings) {
+          let ids = m.studentIds;
+          if (typeof ids === "string") {
+            try {
+              ids = JSON.parse(ids);
+            } catch {
+              ids = [];
+            }
+          }
+          if (!Array.isArray(ids)) continue;
+
+          const numericIds = ids.map(Number);
+          const targetId = Number(student.id);
+          if (!numericIds.includes(targetId)) continue;
+
+          const updatedIds = numericIds.filter(sid => sid !== targetId);
+          if (updatedIds.length === 0) {
+            await m.destroy({ transaction: t });
+          } else {
+            await m.update({ studentIds: updatedIds }, { transaction: t });
+          }
+        }
+      }
+
+      // 2. If user is a supervisor (academic or professional)
+      await Internship.update(
+        { academicSupervisorId: null },
+        { where: { academicSupervisorId: user.id }, transaction: t }
+      );
+      await Internship.update(
+        { professionalSupervisorId: null },
+        { where: { professionalSupervisorId: user.id }, transaction: t }
+      );
+
+      // 2b. Clear integer "who did it" traceability columns. These are FK-shaped
+      // references to Users and were previously left dangling after a deletion.
+      await Task.update({ feedbackAcademicBy: null }, { where: { feedbackAcademicBy: user.id }, transaction: t });
+      await Task.update({ feedbackProfessionalBy: null }, { where: { feedbackProfessionalBy: user.id }, transaction: t });
+      await Internship.update({ academicGradeSubmittedBy: null }, { where: { academicGradeSubmittedBy: user.id }, transaction: t });
+      await Internship.update({ professionalGradeSubmittedBy: null }, { where: { professionalGradeSubmittedBy: user.id }, transaction: t });
+
+      await Meeting.destroy({ where: { createdBy: user.id }, transaction: t });
+      await Task.destroy({ where: { supervisorId: user.id }, transaction: t });
+
+      // 3. Delete user's notifications and report comments
+      await Notification.destroy({ where: { userId: user.id }, transaction: t });
+      await ReportComment.destroy({ where: { userId: user.id }, transaction: t });
+
+      // 4. Finally destroy the User record
+      await user.destroy({ transaction: t });
+    });
+
     return res.status(200).json({ message: "User deleted successfully" });
   } catch (error) {
     console.error("DELETE USER ERROR:", error);
@@ -428,16 +505,26 @@ export const importCSV = async (req, res) => {
         row[header] = values[index] || "";
       });
 
+      // Each row is imported inside its own transaction: it either creates
+      // User + Student (+ Internship) completely, or leaves nothing behind.
+      // An unmanaged transaction is used so the surrounding loop flow is kept.
+      let t = null;
       try {
-        const existingUser = await User.findOne({ where: { email: row.student_email } });
+        t = await sequelize.transaction();
+
+        const existingUser = await User.findOne({ where: { email: row.student_email }, transaction: t });
         if (existingUser) {
           results.errors.push({ row: i + 1, error: `Email ${row.student_email} already exists` });
+          await t.rollback();
+          t = null;
           continue;
         }
 
-        const existingMatricule = await Student.findOne({ where: { matricule: row.student_matricule } });
+        const existingMatricule = await Student.findOne({ where: { matricule: row.student_matricule }, transaction: t });
         if (existingMatricule) {
           results.errors.push({ row: i + 1, error: `Matricule ${row.student_matricule} already exists` });
+          await t.rollback();
+          t = null;
           continue;
         }
 
@@ -449,6 +536,7 @@ export const importCSV = async (req, res) => {
           } else {
             let academicSupervisor = await User.findOne({
               where: { email: row.academic_supervisor_email, role: "academic_supervisor" },
+              transaction: t,
             });
 
             if (!academicSupervisor) {
@@ -462,7 +550,7 @@ export const importCSV = async (req, res) => {
                 role: "academic_supervisor",
                 mustChangePassword: true,
                 active: true,
-              });
+              }, { transaction: t });
 
               try {
                 await sendAccountEmail({
@@ -497,6 +585,7 @@ export const importCSV = async (req, res) => {
           } else {
             let professionalSupervisor = await User.findOne({
               where: { email: row.professional_supervisor_email, role: "professional_supervisor" },
+              transaction: t,
             });
 
             if (!professionalSupervisor) {
@@ -510,7 +599,7 @@ export const importCSV = async (req, res) => {
                 role: "professional_supervisor",
                 mustChangePassword: true,
                 active: true,
-              });
+              }, { transaction: t });
 
               try {
                 await sendAccountEmail({
@@ -547,7 +636,7 @@ export const importCSV = async (req, res) => {
           role: "student",
           mustChangePassword: true,
           active: true,
-        });
+        }, { transaction: t });
 
         try {
           await sendAccountEmail({
@@ -567,33 +656,13 @@ export const importCSV = async (req, res) => {
           userId: user.id,
           matricule: row.student_matricule,
           class: row.class,
-        });
+        }, { transaction: t });
 
-        if (academicSupervisorId) {
-          const existingAssignment = await Internship.findOne({
-            where: { studentId: student.id, academicSupervisorId },
-          });
-          if (existingAssignment) {
-            results.errors.push({
-              row: i + 1,
-              error: `Student ${row.student_email} is already assigned to academic supervisor ${row.academic_supervisor_email}`,
-            });
-            continue;
-          }
-        }
-
-        if (professionalSupervisorId) {
-          const existingAssignment = await Internship.findOne({
-            where: { studentId: student.id, professionalSupervisorId },
-          });
-          if (existingAssignment) {
-            results.errors.push({
-              row: i + 1,
-              error: `Student ${row.student_email} is already assigned to professional supervisor ${row.professional_supervisor_email}`,
-            });
-            continue;
-          }
-        }
+        // NOTE: the "already assigned to supervisor" checks that previously sat
+        // here looked up Internship by the id of the Student row created directly
+        // above, so they could never match. Their `continue` skipped the commit
+        // and abandoned the freshly created User + Student as orphans. Duplicate
+        // students are already rejected by the email/matricule checks above.
 
         if (academicSupervisorId || professionalSupervisorId) {
           await Internship.create({
@@ -601,11 +670,24 @@ export const importCSV = async (req, res) => {
             academicSupervisorId,
             professionalSupervisorId,
             company: row.company || null,
-          });
+          }, { transaction: t });
         }
+
+        await t.commit();
+        t = null;
 
         results.success++;
       } catch (error) {
+        if (t) {
+          try {
+            await t.rollback();
+          } catch (rollbackError) {
+            console.error("CSV IMPORT ROLLBACK ERROR:", rollbackError.message);
+          }
+          t = null;
+          // The cache may hold supervisor ids written by the rolled-back row.
+          supervisorCache.clear();
+        }
         results.errors.push({ row: i + 1, error: error.message });
       }
     }
@@ -728,6 +810,7 @@ export const getAllStudents = async (req, res) => {
           model: User,
           as: "user",
           attributes: ["id", "name", "email", "role"],
+          required: true,
         },
         {
           model: Internship,
