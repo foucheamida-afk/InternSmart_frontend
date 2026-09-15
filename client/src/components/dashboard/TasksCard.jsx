@@ -7,14 +7,17 @@ import {
 import api from '../../api/axios'
 
 const STATUS_COLORS = {
-  pending:     { bg: 'rgba(156,163,175,0.15)', text: '#9ca3af', label: 'Pending' },
-  in_progress: { bg: 'rgba(245,166,35,0.15)',  text: '#F5A623', label: 'In Progress' },
-  completed:   { bg: 'rgba(16,185,129,0.15)',  text: '#10b981', label: 'Completed' },
+  pending:        { bg: 'rgba(156,163,175,0.15)', text: '#9ca3af', label: 'Pending' },
+  in_progress:    { bg: 'rgba(245,166,35,0.15)',  text: '#F5A623', label: 'In Progress' },
+  submitted:      { bg: 'rgba(59,130,246,0.15)',  text: '#3b82f6', label: 'Awaiting Review' },
+  needs_revision: { bg: 'rgba(239,68,68,0.15)',   text: '#ef4444', label: 'Needs Revision' },
+  completed:      { bg: 'rgba(16,185,129,0.15)',  text: '#10b981', label: 'Completed' },
 }
 
 function TaskDetailModal({ task, onClose, onRefresh }) {
   const [progress, setProgress] = useState(task.progress || 0)
-  const [submissionNote, setSubmissionNote] = useState('')
+  const [submissionNote, setSubmissionNote] = useState(task.submissionNote || '')
+  const [workUrl, setWorkUrl] = useState(task.workUrl || '')
   const [saving, setSaving] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [localTask, setLocalTask] = useState(task)
@@ -39,10 +42,10 @@ function TaskDetailModal({ task, onClose, onRefresh }) {
   }
 
   const handleSubmit = async () => {
-    if (!window.confirm('Submit this task as complete?')) return
+    if (!window.confirm('Submit this task to your supervisor for review?')) return
     setSubmitting(true)
     try {
-      const res = await api.post(`/students/tasks/${task.id}/submit`, { submissionNote })
+      const res = await api.post(`/students/tasks/${task.id}/submit`, { submissionNote, workUrl })
       setLocalTask(res.data.task)
       onRefresh()
     } catch (err) {
@@ -55,12 +58,14 @@ function TaskDetailModal({ task, onClose, onRefresh }) {
   const status = localTask.status || 'pending'
   const statusStyle = STATUS_COLORS[status] || STATUS_COLORS.pending
   const isCompleted = status === 'completed'
+  const isSubmitted = status === 'submitted'
+  const needsRevision = status === 'needs_revision'
   const hasFeedback = !!localTask.feedback
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div
-        className="relative w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden"
+        className="relative w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--line)', color: 'var(--text)' }}
       >
         {/* Header */}
@@ -74,9 +79,9 @@ function TaskDetailModal({ task, onClose, onRefresh }) {
                 {statusStyle.label}
               </span>
               {hasFeedback && (
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full"
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full flex items-center gap-1"
                   style={{ backgroundColor: 'rgba(139,92,246,0.15)', color: '#a78bfa' }}>
-                  Feedback ✦
+                  <Star size={11} /> Feedback
                 </span>
               )}
             </div>
@@ -86,7 +91,7 @@ function TaskDetailModal({ task, onClose, onRefresh }) {
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-white/10 transition flex-shrink-0"
+            className="p-1.5 rounded-lg hover:bg-white/10 transition flex-shrink-0 cursor-pointer"
             style={{ color: 'var(--text-muted)' }}
           >
             <X size={20} />
@@ -99,7 +104,7 @@ function TaskDetailModal({ task, onClose, onRefresh }) {
             <button
               key={pane}
               onClick={() => setActivePane(pane)}
-              className="flex-1 py-3 text-sm font-semibold capitalize transition"
+              className="flex-1 py-3 text-sm font-semibold capitalize transition cursor-pointer"
               style={{
                 color: activePane === pane ? '#F5A623' : 'var(--text-muted)',
                 borderBottom: activePane === pane ? '2px solid #F5A623' : '2px solid transparent',
@@ -111,13 +116,38 @@ function TaskDetailModal({ task, onClose, onRefresh }) {
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-5 max-h-[60vh] overflow-y-auto">
+        <div className="p-6 space-y-5 overflow-y-auto flex-1">
           {activePane === 'details' ? (
             <>
+              {/* Status Banners */}
+              {isSubmitted && (
+                <div className="rounded-xl p-3 border bg-blue-500/10 border-blue-500/30 text-blue-300 text-xs flex items-center gap-2">
+                  <Clock size={16} className="shrink-0" />
+                  <div>
+                    <strong className="block text-[11px] uppercase tracking-wider">Submitted to Supervisor</strong>
+                    <span>Your work was submitted on {formatDate(localTask.submittedAt)}. It is currently under supervisor review.</span>
+                  </div>
+                </div>
+              )}
+
+              {needsRevision && (
+                <div className="rounded-xl p-3 border bg-rose-500/10 border-rose-500/30 text-rose-300 text-xs space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[11px]">
+                    <AlertCircle size={15} /> Revision Requested by Supervisor
+                  </div>
+                  {localTask.feedback && (
+                    <p className="bg-black/30 p-2 rounded border border-rose-500/20 text-xs italic">
+                      "{localTask.feedback}"
+                    </p>
+                  )}
+                  <p className="text-[11px]">Please revise your submission below and click <strong>Resubmit Task</strong>.</p>
+                </div>
+              )}
+
               {/* Description */}
               {localTask.description && (
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Description</p>
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--text-muted)' }}>Task Description</p>
                   <p className="text-sm leading-relaxed" style={{ color: 'var(--text-soft)' }}>{localTask.description}</p>
                 </div>
               )}
@@ -132,7 +162,7 @@ function TaskDetailModal({ task, onClose, onRefresh }) {
                   </div>
                 </div>
                 <div className="rounded-xl p-3 border" style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)' }}>
-                  <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Submitted</p>
+                  <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Submitted Date</p>
                   <div className="flex items-center gap-2">
                     <Clock size={14} style={{ color: localTask.submittedAt ? '#10b981' : 'var(--text-muted)' }} />
                     <span className="text-sm font-semibold">{localTask.submittedAt ? formatDate(localTask.submittedAt) : 'Not yet'}</span>
@@ -140,15 +170,7 @@ function TaskDetailModal({ task, onClose, onRefresh }) {
                 </div>
               </div>
 
-              {/* Submission note */}
-              {localTask.submissionNote && (
-                <div className="rounded-xl p-3 border" style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)' }}>
-                  <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Your Submission Note</p>
-                  <p className="text-sm" style={{ color: 'var(--text-soft)' }}>{localTask.submissionNote}</p>
-                </div>
-              )}
-
-              {/* Progress slider */}
+              {/* Progress slider (only if not completed) */}
               {!isCompleted && (
                 <div>
                   <div className="flex justify-between items-center mb-2">
@@ -162,7 +184,7 @@ function TaskDetailModal({ task, onClose, onRefresh }) {
                     step="5"
                     value={progress}
                     onChange={(e) => setProgress(parseInt(e.target.value))}
-                    className="w-full accent-orange-400"
+                    className="w-full accent-orange-400 cursor-pointer"
                   />
                   <div className="mt-1.5 h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--line)' }}>
                     <div
@@ -173,33 +195,75 @@ function TaskDetailModal({ task, onClose, onRefresh }) {
                 </div>
               )}
 
-              {/* Completed progress bar */}
-              {isCompleted && (
-                <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Progress</p>
-                    <span className="text-sm font-bold text-emerald-400">100%</span>
+              {/* Work Details & Submission inputs */}
+              {!isCompleted && (
+                <div className="space-y-3 pt-2 border-t" style={{ borderColor: 'var(--line)' }}>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>
+                      Submission Notes / Description of Accomplished Work
+                    </label>
+                    <textarea
+                      value={submissionNote}
+                      onChange={(e) => setSubmissionNote(e.target.value)}
+                      placeholder="Describe what work was completed, methodologies used, or deliverables produced..."
+                      rows={3}
+                      className="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none resize-none"
+                      style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                    />
                   </div>
-                  <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--line)' }}>
-                    <div className="h-full rounded-full bg-emerald-500 w-full" />
+
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>
+                      Work Link / Document URL <span style={{ fontWeight: 400 }}>(optional)</span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="url"
+                        value={workUrl}
+                        onChange={(e) => setWorkUrl(e.target.value)}
+                        placeholder="https://github.com/... or https://drive.google.com/..."
+                        className="flex-1 rounded-xl border px-3 py-2 text-xs focus:outline-none"
+                        style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                      />
+                      {workUrl && (
+                        <a
+                          href={workUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/30 hover:bg-blue-500/20"
+                          title="Open Link"
+                        >
+                          <ArrowUpRight size={14} />
+                        </a>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* Submission note input */}
-              {!isCompleted && (
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-                    Submission Note <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span>
-                  </p>
-                  <textarea
-                    value={submissionNote}
-                    onChange={(e) => setSubmissionNote(e.target.value)}
-                    placeholder="Add a note for your supervisor..."
-                    rows={3}
-                    className="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none resize-none"
-                    style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)', color: 'var(--text)' }}
-                  />
+              {/* If completed, view submitted work note & link */}
+              {isCompleted && (
+                <div className="space-y-3">
+                  {localTask.submissionNote && (
+                    <div className="rounded-xl p-3 border" style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)' }}>
+                      <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Submitted Work Notes</p>
+                      <p className="text-sm" style={{ color: 'var(--text-soft)' }}>{localTask.submissionNote}</p>
+                    </div>
+                  )}
+
+                  {localTask.workUrl && (
+                    <div className="rounded-xl p-3 border" style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)' }}>
+                      <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Submitted Work Link</p>
+                      <a
+                        href={localTask.workUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-400 hover:underline flex items-center gap-1"
+                      >
+                        {localTask.workUrl} <ArrowUpRight size={12} />
+                      </a>
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -240,7 +304,7 @@ function TaskDetailModal({ task, onClose, onRefresh }) {
 
         {/* Footer actions */}
         {!isCompleted && activePane === 'details' && (
-          <div className="flex gap-3 px-6 pb-6">
+          <div className="flex gap-3 px-6 pb-6 pt-3 border-t" style={{ borderColor: 'var(--line)' }}>
             <button
               onClick={handleSaveProgress}
               disabled={saving}
@@ -257,17 +321,17 @@ function TaskDetailModal({ task, onClose, onRefresh }) {
               style={{ background: 'linear-gradient(135deg, #F5A623, #fb923c)' }}
             >
               {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-              Submit Task
+              {isSubmitted ? 'Update Submission' : needsRevision ? 'Resubmit Task' : 'Submit Task'}
             </button>
           </div>
         )}
 
         {isCompleted && (
-          <div className="px-6 pb-6">
+          <div className="px-6 pb-6 pt-2">
             <div className="flex items-center gap-3 py-3 px-4 rounded-xl"
               style={{ backgroundColor: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}>
               <CheckCircle2 size={18} className="text-emerald-400 flex-shrink-0" />
-              <p className="text-sm font-semibold text-emerald-400">Task completed and submitted</p>
+              <p className="text-sm font-semibold text-emerald-400">Task approved and completed by supervisor</p>
             </div>
           </div>
         )}

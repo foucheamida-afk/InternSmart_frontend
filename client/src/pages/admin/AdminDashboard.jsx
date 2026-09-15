@@ -21,6 +21,8 @@ import {
 } from 'lucide-react'
 import ThemeToggle from '../../components/ThemeToggle'
 import { adminApi } from '../../services/adminService'
+import { useAuth } from '../../context/AuthContext'
+import { getStoredUser } from '../../utils/storage'
 import '../../assets/css/dashboard.css'
 
 const navItems = [
@@ -39,20 +41,17 @@ const navItems = [
 export default function AdminDashboard() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { logout } = useAuth()
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
-  const [admin, setAdmin] = useState(null)
+  const [admin, setAdmin] = useState(() => getStoredUser())
   const [stats, setStats] = useState(null)
   const [loadingStats, setLoadingStats] = useState(true)
 
   useEffect(() => {
-    const adminData = localStorage.getItem('user')
+    const adminData = getStoredUser()
     if (adminData) {
-      try {
-        setAdmin(JSON.parse(adminData))
-      } catch {
-        // ignore
-      }
+      setAdmin(adminData)
     }
   }, [])
 
@@ -71,8 +70,7 @@ export default function AdminDashboard() {
   }, [])
 
   const handleSignOut = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
+    logout()
     navigate('/login')
   }
 

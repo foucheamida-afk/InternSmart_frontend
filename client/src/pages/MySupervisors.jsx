@@ -14,11 +14,14 @@ import {
 } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
 import ThemeToggle from '../components/ThemeToggle'
+import { useAuth } from '../context/AuthContext'
+import { getStoredToken, clearStoredAuth } from '../utils/storage'
 import '../assets/css/dashboard.css'
 
 const MySupervisors = () => {
   const navigate = useNavigate()
   const location = useLocation()
+  const { logout } = useAuth()
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -36,7 +39,7 @@ const MySupervisors = () => {
   useEffect(() => {
     const fetchStudentProfile = async () => {
       try {
-        const token = localStorage.getItem('token')
+        const token = getStoredToken()
 
         if (!token) {
           navigate('/login')
@@ -57,8 +60,7 @@ const MySupervisors = () => {
           console.error('STUDENT PROFILE ERROR:', data)
 
           if (response.status === 401) {
-            localStorage.removeItem('token')
-            localStorage.removeItem('user')
+            clearStoredAuth()
             navigate('/login')
             return
           }
@@ -98,8 +100,7 @@ const MySupervisors = () => {
   }
 
   const handleSignOut = () => {
-    localStorage.removeItem('user')
-    localStorage.removeItem('token')
+    logout()
     navigate('/login')
   }
 

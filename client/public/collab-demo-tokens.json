@@ -1,0 +1,11 @@
+{
+  "url": "ws://127.0.0.1:1234",
+  "documentName": "report-1",
+  "reportId": 1,
+  "studentToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MiwibmFtZSI6IkRlbW8gU3R1ZGVudCIsImVtYWlsIjoiZGVtby5zdHVkZW50QGV4YW1wbGUuaW52YWxpZCIsInJvbGUiOiJzdHVkZW50IiwiaWF0IjoxNzg5NDAzNDI3LCJleHAiOjE3ODk0NDY2Mjd9.XZTXqdHCI5pMiD7zOWotAvvtZuPKlzJyJwDSTWR7q0E",
+  "supervisorToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwibmFtZSI6IkRlbW8gU3VwZXJ2aXNvciIsImVtYWlsIjoiZGVtby5zdXBlcnZpc29yQGV4YW1wbGUuaW52YWxpZCIsInJvbGUiOiJhY2FkZW1pY19zdXBlcnZpc29yIiwiaWF0IjoxNzg5NDAzNDI3LCJleHAiOjE3ODk0NDY2Mjd9.TX281FeBMyRpYB9ju-tAsVy68yVip0wO1TSL0bAp_dY",
+  "accounts": {
+    "student": "demo.student@example.invalid / Test1234!",
+    "supervisor": "demo.supervisor@example.invalid / Test1234!"
+  }
+}

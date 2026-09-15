@@ -10,6 +10,7 @@ import {
   Settings,
   Zap,
   ArrowRight,
+  Library,
   X,
 } from 'lucide-react'
 import '../assets/css/sidebar.css'
@@ -24,6 +25,7 @@ export default function Sidebar({ isOpen, onToggle }) {
     { icon: PenLine, label: 'Writing Workspace', path: '/writing-workspace', active: location.pathname === '/writing-workspace' },
     { icon: Brain, label: 'AI Analysis', path: '/ai-analysis', active: location.pathname.startsWith('/ai-analysis') },
     { icon: Users, label: 'Supervisors', path: '/supervisors', active: location.pathname === '/supervisors' },
+    { icon: Library, label: 'Report Library', path: '/library', active: location.pathname === '/library' },
     { icon: Settings, label: 'Settings', path: '/settings', active: location.pathname === '/settings' },
   ]
 

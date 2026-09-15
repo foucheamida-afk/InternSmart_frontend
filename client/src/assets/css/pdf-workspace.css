@@ -1,0 +1,809 @@
+/* PDF workspace.
+ *
+ * The layout is a three-column shell - outline, the editing area, comments -
+ * with the file and the editable text sharing the middle column when the view is
+ * "split". Colours come from the same custom properties the rest of the
+ * dashboards use, so the workspace follows the theme without a second palette.
+ */
+
+.pdfw-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* --- header --------------------------------------------------------------- */
+
+.pdfw-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-panel);
+}
+
+.pdfw-header-left,
+.pdfw-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pdfw-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.pdfw-title > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 42ch;
+}
+
+.pdfw-title-file {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.pdfw-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.pdfw-ghost:hover {
+  border-color: var(--orange-3);
+  color: var(--orange-3);
+}
+
+.pdfw-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(to right, #ff7a00, #ff8a1c, #ff9d3d);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pdfw-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pdfw-sessionbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-panel);
+}
+
+.pdfw-status {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.pdfw-status.is-dirty { color: var(--orange-3); }
+.pdfw-status.is-error { color: #f87171; }
+
+.pdfw-presence {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 18px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.pdfw-presence-label,
+.pdfw-presence-me,
+.pdfw-presence-peer {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+
+.pdfw-presence-me {
+  border-color: rgba(255, 122, 0, 0.4);
+  color: var(--orange-3);
+}
+
+.pdfw-presence-peer {
+  color: var(--text-soft);
+}
+
+.pdfw-connection {
+  margin-left: auto;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 10px;
+}
+
+.pdfw-connection.is-connected { color: #34d399; }
+.pdfw-connection.is-connecting { color: var(--orange-3); }
+.pdfw-connection.is-disconnected,
+.pdfw-connection.is-denied { color: #f87171; }
+
+/* --- banners and notes ---------------------------------------------------- */
+
+.pdfw-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 18px 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 12.5px;
+}
+
+.pdfw-banner.is-error {
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.1);
+  color: #fca5a5;
+}
+
+.pdfw-inline-link {
+  border: none;
+  background: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: inherit;
+}
+
+.pdfw-notes {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 18px 0;
+  padding: 10px 34px 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 122, 0, 0.05);
+}
+
+.pdfw-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.pdfw-note.is-warning { color: var(--orange-3); }
+
+.pdfw-note.is-muted {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.pdfw-note-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.pdfw-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 80px 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* --- layout --------------------------------------------------------------- */
+
+.pdfw-body {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+  padding: 14px 18px 22px;
+}
+
+.pdfw-body.is-pdf,
+.pdfw-body.is-document {
+  grid-template-columns: 240px minmax(0, 1fr);
+}
+
+.pdfw-outline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: start;
+  position: sticky;
+  top: 14px;
+  max-height: calc(100vh - 210px);
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-panel);
+}
+
+.pdfw-panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.pdfw-outline-stats {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.pdfw-outline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.pdfw-outline-item {
+  border: none;
+  background: none;
+  color: var(--text-soft);
+  text-align: left;
+  font-size: 12px;
+  padding: 3px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdfw-outline-item:hover { background: rgba(255, 122, 0, 0.1); color: var(--orange-3); }
+.pdfw-outline-item.level-2 { padding-left: 14px; font-size: 11.5px; }
+.pdfw-outline-item.level-3 { padding-left: 24px; font-size: 11px; color: var(--text-muted); }
+.pdfw-outline-item.level-4 { padding-left: 34px; font-size: 11px; color: var(--text-muted); }
+
+.pdfw-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 10px;
+}
+
+/* --- toolbar -------------------------------------------------------------- */
+
+.pdfw-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-panel);
+}
+
+.pdfw-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.pdfw-toolbar-group.is-right {
+  margin-left: auto;
+}
+
+.pdfw-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.pdfw-tool:hover:not(:disabled) { border-color: var(--line); color: var(--text); }
+.pdfw-tool.is-active { background: rgba(255, 122, 0, 0.14); color: var(--orange-3); }
+.pdfw-tool:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.pdfw-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: #fff100;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.pdfw-view-switch {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.pdfw-view-switch button {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.pdfw-view-switch button.is-active {
+  background: rgba(255, 122, 0, 0.14);
+  color: var(--orange-3);
+}
+
+/* --- panes ---------------------------------------------------------------- */
+
+.pdfw-panes {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  min-height: 0;
+  flex: 1;
+}
+
+.pdfw-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.pdfw-pane.is-pdf { flex: 1 1 50%; }
+.pdfw-pane.is-document { flex: 1 1 50%; }
+.pdfw-pane.is-comments { flex: 0 0 300px; max-width: 300px; }
+
+.pdfw-body.is-pdf .pdfw-pane.is-pdf,
+.pdfw-body.is-document .pdfw-pane.is-document { flex: 1 1 auto; }
+
+.pdfw-pane-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.pdfw-pane-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+  padding: 3px 6px;
+}
+
+.pdfw-page-input {
+  width: 52px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.pdfw-spacer { flex: 1; }
+
+.pdfw-stale-hint {
+  color: var(--orange-3);
+  font-size: 11px;
+}
+
+.pdfw-muted { color: var(--text-muted); font-size: 11.5px; }
+
+/* --- the PDF file itself -------------------------------------------------- */
+
+.pdfv-frame {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.pdfv-frame-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.pdfv-frame-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdfv-frame-actions { display: inline-flex; gap: 4px; }
+
+.pdfv-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.pdfv-frame-body {
+  position: relative;
+  flex: 1;
+  min-height: 520px;
+  background: #3a3a3a;
+}
+
+.pdfv-frame-pdf {
+  width: 100%;
+  height: 100%;
+  min-height: 520px;
+  border: 0;
+  display: block;
+  background: #3a3a3a;
+}
+
+.pdfv-frame-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #e5e5e5;
+  background: rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.pdfv-frame-overlay.is-error { color: #fca5a5; }
+
+/* --- editable document ---------------------------------------------------- */
+
+.pdfw-paper {
+  flex: 1;
+  overflow: auto;
+  padding: 18px;
+  background: var(--bg);
+}
+
+.pdfw-paper[data-empty='true'] .pdfw-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.pdfw-awaiting {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  max-width: 520px;
+  margin: 40px auto;
+  padding: 14px 16px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.pdfw-awaiting p { margin: 0; }
+
+/* --- page-faithful editing -------------------------------------------------
+ *
+ * An imported PDF is edited on its own pages: each `.pdfw-page` is a sheet of the
+ * size the file declared (in points, so the on-screen size matches the paper),
+ * and every block inside it is absolutely positioned at the coordinates the file
+ * gave it. Nothing here re-flows the text — the geometry comes from the PDF and
+ * goes back into it.
+ */
+
+.pdfw-editor {
+  outline: none;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.pdfw-page {
+  position: relative;
+  flex: none;
+  background: #ffffff;
+  color: #111111;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.22);
+  /* A page is a sheet of paper, not a box that grows: text that overflows its
+   * column spills visibly instead of pushing the layout around. */
+  overflow: visible;
+}
+
+.pdfw-block {
+  outline: none;
+  /* The PDF's own spacing is encoded in where each block sits, so a block must
+   * not add margins of its own. */
+  margin: 0;
+  padding: 0;
+  color: inherit;
+}
+
+.pdfw-block:hover {
+  background: rgba(255, 122, 0, 0.055);
+  box-shadow: 0 0 0 1px rgba(255, 122, 0, 0.22);
+}
+
+.pdfw-block:focus,
+.pdfw-block:focus-within {
+  background: rgba(255, 122, 0, 0.08);
+  box-shadow: 0 0 0 1px rgba(255, 122, 0, 0.55);
+}
+
+.pdfw-block.is-heading { font-weight: 600; }
+
+.pdfw-figure {
+  display: block;
+  object-fit: contain;
+  user-select: none;
+}
+
+.pdfw-figure.ProseMirror-selectednode { outline: 2px solid var(--orange-3); }
+
+/* --- flowed fallback -------------------------------------------------------
+ * For a report written here, or content saved before the layout was preserved:
+ * there are no pages, so the text is laid out as a plain sheet.
+ */
+
+.pdfw-editor > p,
+.pdfw-editor > h1,
+.pdfw-editor > h2,
+.pdfw-editor > h3,
+.pdfw-editor > h4,
+.pdfw-editor > ul,
+.pdfw-editor > ol,
+.pdfw-editor > blockquote,
+.pdfw-editor > table {
+  width: 760px;
+  max-width: 100%;
+  background: #ffffff;
+  color: #111111;
+  padding-left: 40px;
+  padding-right: 40px;
+}
+
+.pdfw-editor > p:first-child,
+.pdfw-editor > h1:first-child,
+.pdfw-editor > h2:first-child,
+.pdfw-editor > h3:first-child { padding-top: 34px; }
+
+.pdfw-editor > p:last-child { padding-bottom: 34px; }
+
+.pdfw-editor h1 { font-size: 25px; margin: 20px 0 10px; }
+.pdfw-editor h2 { font-size: 20px; margin: 18px 0 8px; }
+.pdfw-editor h3 { font-size: 17px; margin: 15px 0 7px; }
+.pdfw-editor h4 { font-size: 15px; margin: 12px 0 6px; }
+.pdfw-editor > p { margin: 0 0 10px; }
+.pdfw-editor ul,
+.pdfw-editor ol { margin: 0 0 10px; padding-left: 64px; }
+.pdfw-editor blockquote {
+  margin: 0 0 12px;
+  border-left: 3px solid #d4d4d4;
+  font-style: italic;
+}
+.pdfw-editor > img {
+  display: block;
+  width: 760px;
+  max-width: 100%;
+  height: auto;
+  margin: 12px auto;
+  background: #ffffff;
+}
+.pdfw-editor table {
+  width: 760px;
+  border-collapse: collapse;
+  margin: 0 0 12px;
+}
+.pdfw-editor table td,
+.pdfw-editor table th {
+  border: 1px solid #b8b8b8;
+  padding: 5px 7px;
+  vertical-align: top;
+}
+.pdfw-editor table th { background: #f0f0f0; }
+.pdfw-editor a { color: #2563eb; text-decoration: underline; }
+
+.pdfw-editor .ww-page-break,
+.pdfw-editor [data-page-break] {
+  display: block;
+  width: 760px;
+  max-width: 100%;
+  margin: 0;
+  border-top: 1px dashed #c9c9c9;
+  color: #9a9a9a;
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: center;
+  padding-top: 4px;
+  background: #ffffff;
+}
+
+/* Collaboration carets and selections. */
+.collaboration-cursor__caret {
+  position: relative;
+  margin-left: -1px;
+  margin-right: -1px;
+  border-left: 1px solid #ff7a00;
+  border-right: 1px solid #ff7a00;
+  word-break: normal;
+  pointer-events: none;
+}
+
+.collaboration-cursor__label {
+  position: absolute;
+  top: -1.4em;
+  left: -1px;
+  padding: 1px 6px;
+  border-radius: 4px 4px 4px 0;
+  background: #ff7a00;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* --- comments ------------------------------------------------------------- */
+
+.pdfw-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 10px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.pdfw-comment {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.pdfw-comment header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.pdfw-comment header strong { color: var(--text); font-size: 12px; }
+
+.pdfw-comment header button {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.pdfw-comment-section {
+  margin: 5px 0 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--orange-3) !important;
+}
+
+.pdfw-comment p { margin: 0 0 5px; color: var(--text-soft); }
+.pdfw-comment time { font-size: 10px; color: var(--text-muted); }
+
+.pdfw-comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.pdfw-input {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+/* --- toast ---------------------------------------------------------------- */
+
+.pdfw-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #6ee7b7;
+  font-size: 12px;
+}
+
+@media (max-width: 1200px) {
+  .pdfw-panes { flex-direction: column; }
+  .pdfw-pane.is-comments { flex: 1 1 auto; max-width: none; }
+  .pdfw-body { grid-template-columns: minmax(0, 1fr); }
+  .pdfw-outline { position: static; max-height: 220px; }
+}

@@ -26,7 +26,15 @@ export default function AdminUsers() {
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const [newUser, setNewUser] = useState({ name: '', email: '', role: 'student', matricule: '', class: '' })
+  const [newUser, setNewUser] = useState({
+    name: '',
+    email: '',
+    role: 'student',
+    matricule: '',
+    class: '',
+    academicSupervisorName: '',
+    academicSupervisorEmail: '',
+  })
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
   const [createSuccess, setCreateSuccess] = useState('')
@@ -64,12 +72,31 @@ export default function AdminUsers() {
     setCreateSuccess('')
     try {
       const result = await adminApi.createUser(newUser)
-      setNewUser({ name: '', email: '', role: 'student', matricule: '', class: '' })
+      setNewUser({
+        name: '',
+        email: '',
+        role: 'student',
+        matricule: '',
+        class: '',
+        academicSupervisorName: '',
+        academicSupervisorEmail: '',
+      })
       setIsCreateOpen(false)
       fetchUsers()
-      setCreateSuccess(result.emailSent === false
-        ? 'User created successfully, but the account email was not sent. Use Resend email in the user actions.'
-        : 'User created successfully and the account email was sent.')
+
+      // The supervisor half of the response is worth surfacing: it tells the
+      // admin whether credentials were emailed or an existing account was reused.
+      const supervisorNote = result.academicSupervisor
+        ? result.academicSupervisor.accountCreated
+          ? ` An academic supervisor account was created for ${result.academicSupervisor.email} and their login details were emailed.`
+          : ` ${result.academicSupervisor.email} already had an account and has been linked as the academic supervisor.`
+        : ''
+
+      setCreateSuccess(
+        (result.emailSent === false
+          ? 'User created successfully, but the account email was not sent. Use Resend email in the user actions.'
+          : 'User created successfully and the account email was sent.') + supervisorNote
+      )
     } catch (error) {
       setCreateError(error.response?.data?.message || 'Unable to create user.')
     } finally {
@@ -476,6 +503,49 @@ export default function AdminUsers() {
                         color: 'var(--text)'
                       }}
                     />
+                  </div>
+
+                  {/* Assigning the academic supervisor while creating the student is
+                      the documented workflow: the supervisor's account is reused if
+                      the email already exists, and created with emailed credentials
+                      if it does not. */}
+                  <div className="rounded-xl border p-3 space-y-3" style={{ borderColor: 'var(--line)' }}>
+                    <p className="font-semibold" style={{ color: 'var(--text-soft)' }}>Academic Supervisor</p>
+
+                    <div>
+                      <label className="block mb-1" style={{ color: 'var(--text-muted)' }}>Supervisor Name</label>
+                      <input
+                        value={newUser.academicSupervisorName}
+                        onChange={(e) => setNewUser({ ...newUser, academicSupervisorName: e.target.value })}
+                        placeholder="e.g. Prof. Ada Lovelace"
+                        className="w-full rounded-xl border p-2.5 text-xs focus:outline-none"
+                        style={{
+                          backgroundColor: 'var(--bg)',
+                          borderColor: 'var(--line)',
+                          color: 'var(--text)'
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block mb-1" style={{ color: 'var(--text-muted)' }}>Supervisor Email</label>
+                      <input
+                        type="email"
+                        value={newUser.academicSupervisorEmail}
+                        onChange={(e) => setNewUser({ ...newUser, academicSupervisorEmail: e.target.value })}
+                        placeholder="e.g. ada@university.edu"
+                        className="w-full rounded-xl border p-2.5 text-xs focus:outline-none"
+                        style={{
+                          backgroundColor: 'var(--bg)',
+                          borderColor: 'var(--line)',
+                          color: 'var(--text)'
+                        }}
+                      />
+                      <p className="mt-1" style={{ color: 'var(--text-muted)' }}>
+                        Leave blank to assign later. If this person has no account yet, one is
+                        created and the login details are emailed to them.
+                      </p>
+                    </div>
                   </div>
                 </>
               )}

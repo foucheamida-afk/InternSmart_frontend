@@ -4,15 +4,19 @@ import {
   Users, FileCheck, Calendar, Clock, CheckCircle2, AlertCircle,
   MessageSquare, Search, Bell, LogOut, ChevronDown, Video, Star,
   Zap, Menu, X, FileText, Plus, Trash2, Edit, Save, XCircle,
-  Loader2, Lock, Link as LinkIcon, MapPin, ExternalLink, GraduationCap,
+  Loader2, Lock, Link as LinkIcon, MapPin, ExternalLink, GraduationCap, Eye, Inbox,
 } from 'lucide-react'
 import logoImg from '@assets/images/logo.png'
 import '../assets/css/dashboard.css'
 import '../assets/css/dashboard-components.css'
 import ThemeToggle from '../components/ThemeToggle'
+import RoleSwitcher from '../components/RoleSwitcher'
 import { supervisorApi } from '../services/supervisorService'
 import api from '../api/axios'
 import TimelineCard from '../components/dashboard/TimelineCard'
+import InspectSubmissionModal from '../components/dashboard/InspectSubmissionModal'
+import { useAuth } from '../context/AuthContext'
+import { getStoredToken } from '../utils/storage'
 
 const getLocalDateTime = () => {
   const now = new Date()
@@ -180,6 +184,7 @@ const GradingTab = ({ interns }) => {
 
 export default function SupervisorDashboard() {
   const navigate = useNavigate()
+  const { logout } = useAuth()
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('interns')
@@ -212,6 +217,7 @@ export default function SupervisorDashboard() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false)
   const [editingTaskId, setEditingTaskId] = useState(null)
+  const [inspectingTask, setInspectingTask] = useState(null)
   const [editForm, setEditForm] = useState({ title: '', description: '', dueDate: '', progress: 0 })
   const [feedbackTaskId, setFeedbackTaskId] = useState(null)
   const [feedbackText, setFeedbackText] = useState('')
@@ -245,14 +251,18 @@ export default function SupervisorDashboard() {
         avgProgress,
       })
 
-      const token = localStorage.getItem('token')
+      const token = getStoredToken()
       if (token) {
-        const payload = JSON.parse(atob(token.split('.')[1]))
-        setSupervisor({
-          name: payload.name || 'Supervisor',
-          email: payload.email,
-          role: payload.role,
-        })
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]))
+          setSupervisor({
+            name: payload.name || 'Supervisor',
+            email: payload.email,
+            role: payload.role,
+          })
+        } catch {
+          // ignore
+        }
       }
     } catch (err) {
       console.error('Fetch dashboard error:', err)
@@ -280,6 +290,16 @@ export default function SupervisorDashboard() {
       setEditForm({ title: '', description: '', dueDate: '', progress: 0 })
       fetchDashboardData()
     } catch (err) { console.error('Update task error:', err) }
+  }
+
+  const handleReviewTaskSubmission = async (taskId, status, feedback) => {
+    try {
+      await supervisorApi.updateTask(taskId, { status, feedback })
+      setInspectingTask(null)
+      fetchDashboardData()
+    } catch (err) {
+      console.error('Review task submission error:', err)
+    }
   }
 
   const handleDeleteTask = async (id) => {
@@ -419,8 +439,7 @@ export default function SupervisorDashboard() {
   }
 
   const handleSignOut = () => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
+    logout()
     navigate('/login')
   }
 
@@ -525,6 +544,13 @@ export default function SupervisorDashboard() {
             <GraduationCap size={18} className="nav-icon" />
             <span className="nav-label">Grading</span>
           </button>
+          {/* Report validation lives on its own page because it is shared with
+              the professional-supervisor capacity (§4.12). */}
+          <button type="button" className="sidebar-nav-item" onClick={() => navigate('/reviews')}>
+            <Inbox size={18} className="nav-icon" />
+            <span className="nav-label">Report Reviews</span>
+          </button>
+          <RoleSwitcher />
         </nav>
 
         <div className="sidebar-ai-card">
@@ -754,6 +780,8 @@ export default function SupervisorDashboard() {
                   }}
                 >
                   <option value="all">All Status</option>
+                  <option value="submitted">Submitted for Review</option>
+                  <option value="needs_revision">Needs Revision</option>
                   <option value="pending">Pending</option>
                   <option value="in_progress">In Progress</option>
                   <option value="completed">Completed</option>
@@ -772,6 +800,8 @@ export default function SupervisorDashboard() {
                   {filteredTasks.map((task) => {
                     const intern = interns.find(i => i.id === task.studentId)
                     const isEditing = editingTaskId === task.id
+                    const isSubmitted = task.status === 'submitted'
+                    const needsRevision = task.status === 'needs_revision'
 
                     return (
                       <div key={task.id} className="p-4 hover:bg-white/[0.02] transition">
@@ -829,14 +859,16 @@ export default function SupervisorDashboard() {
                         ) : (
                           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
                                 <h4 className="font-semibold text-sm truncate" style={{ color: 'var(--text)' }}>{task.title}</h4>
                                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase ${
                                   task.status === 'completed' ? 'bg-emerald-500/15 text-emerald-300' :
+                                  task.status === 'submitted' ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30 font-bold' :
+                                  task.status === 'needs_revision' ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30 font-bold' :
                                   task.status === 'in_progress' ? 'bg-amber-500/15 text-amber-300' :
                                   'bg-white/10 text-white/60'
                                 }`}>
-                                  {task.status?.replace('_', ' ')}
+                                  {task.status === 'submitted' ? 'Awaiting Review' : task.status?.replace('_', ' ')}
                                 </span>
                               </div>
                               {task.description && (
@@ -858,7 +890,17 @@ export default function SupervisorDashboard() {
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                              {(isSubmitted || task.submissionNote || task.workUrl) && (
+                                <button
+                                  onClick={() => setInspectingTask(task)}
+                                  className="px-3 py-1.5 rounded-lg border transition cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
+                                  style={{ backgroundColor: 'rgba(59,130,246,0.12)', borderColor: 'rgba(59,130,246,0.3)', color: '#60a5fa' }}
+                                  title="Inspect student submission"
+                                >
+                                  <Eye size={14} /> Review Work
+                                </button>
+                              )}
                               <button
                                 onClick={() => {
                                   setFeedbackTaskId(task.id)
@@ -890,6 +932,7 @@ export default function SupervisorDashboard() {
                                   onClick={() => handleMarkComplete(task.id)}
                                   className="p-2 rounded-lg border transition cursor-pointer hover:bg-white/5"
                                   style={{ borderColor: 'rgba(16, 185, 129, 0.3)', color: '#10b981' }}
+                                  title="Mark completed"
                                 >
                                   <CheckCircle2 size={14} />
                                 </button>
@@ -1371,6 +1414,16 @@ export default function SupervisorDashboard() {
                 />
               </div>
             </div>
+          )}
+
+          {/* Inspect Submission Modal */}
+          {inspectingTask && (
+            <InspectSubmissionModal
+              task={inspectingTask}
+              intern={interns.find(i => i.id === inspectingTask.studentId)}
+              onClose={() => setInspectingTask(null)}
+              onReviewComplete={handleReviewTaskSubmission}
+            />
           )}
 
           {/* Grading Tab */}

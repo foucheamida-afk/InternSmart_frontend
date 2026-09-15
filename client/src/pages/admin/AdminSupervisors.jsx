@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Search, Shield } from 'lucide-react'
+import { Search, Shield, Trash2 } from 'lucide-react'
 import { adminApi } from '../../services/adminService'
 
 const EmptyState = ({ icon: Icon, title, description }) => (
@@ -43,6 +43,17 @@ export default function AdminSupervisors() {
   useEffect(() => {
     fetchSupervisors()
   }, [page, search, roleFilter])
+
+  const handleDeleteSupervisor = async (supervisor) => {
+    if (!supervisor.id) return
+    if (!window.confirm(`Are you sure you want to delete supervisor "${supervisor.name}"? This will remove them everywhere in the app.`)) return
+    try {
+      await adminApi.deleteUser(supervisor.id)
+      setSupervisors(prev => prev.filter(s => s.id !== supervisor.id))
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Failed to delete supervisor')
+    }
+  }
 
   const getRoleBadge = (role) => {
     const styles = {
@@ -125,6 +136,7 @@ export default function AdminSupervisors() {
                   <th className="pb-3 font-semibold px-4">Name</th>
                   <th className="pb-3 font-semibold px-4">Email</th>
                   <th className="pb-3 font-semibold px-4">Type</th>
+                  <th className="pb-3 font-semibold px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y" style={{ borderColor: 'var(--line)' }}>
@@ -133,6 +145,15 @@ export default function AdminSupervisors() {
                     <td className="py-3.5 px-4 font-semibold" style={{ color: 'var(--text)' }}>{s.name}</td>
                     <td className="py-3.5 px-4">{s.email}</td>
                     <td className="py-3.5 px-4">{getRoleBadge(s.role)}</td>
+                    <td className="py-3.5 px-4 text-right">
+                      <button
+                        onClick={() => handleDeleteSupervisor(s)}
+                        title="Delete Supervisor"
+                        className="p-1.5 rounded-lg border border-red-500/20 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition cursor-pointer"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -33,7 +33,7 @@ const featureCards = [
   {
     icon: FiUsers,
     title: 'Effortless Collaboration',
-    description: 'Keep students, supervisors and institutions aligned in real time.',
+    description: 'Keep students, supervisors and institutions working from the same record.',
   },
   {
     icon: FiShield,
@@ -63,7 +63,7 @@ const featureCards = [
 ]
 
 const secondaryCards = [
-  'Real-time Tracking',
+  'Progress Tracking',
   'AI Feedback',
   'Report Versioning',
   'Supervisor Approval',
@@ -83,16 +83,16 @@ const testimonials = [
     initials: 'AF',
   },
   {
-    name: 'Mr. Agbor.',
+    name: 'Mr. Kapnang.',
     role: 'Supervisor',
     text: 'The platform helps me review reports consistently, track student progress and keep every decision documented without losing time.',
-    initials: 'AD',
+    initials: 'KN',
   },
   {
-    name: 'Mr. Kapnang.',
+    name: 'Mr. Agbor.',
     role: 'Program Director',
     text: 'We gained visibility across our entire internship pipeline. It feels premium, secure and deeply aligned with how modern academic teams work.',
-    initials: 'KN',
+    initials: 'AD',
   },
 ]
 
@@ -370,10 +370,10 @@ function LandingPage() {
         <section id="features" className="section">
           <div className="page-shell">
             <div className="reveal">
-              <p className="section-label">Powered by AI · Designed for impact</p>
-              <h2 className="heading-xl">Everything you need,<br /><span className="accent">powered by AI.</span></h2>
+              <p className="section-label">Powered by Innovation· Designed for impact</p>
+              <h2 className="heading-xl">Everything you need,<br /><span className="accent">powered by Innovation·</span></h2>
               <p className="subheading">
-                From smart report analysis to real-time collaboration, InternSmart gives you everything
+                From smart report analysis to in-context supervisor feedback, InternSmart gives you everything
                 you need to work smarter, learn faster and achieve more.
               </p>
             </div>
@@ -419,12 +419,12 @@ function LandingPage() {
                 designed for <span className="accent">everyone.</span>
               </h2>
               <p>
-                From real-time progress tracking to AI insights, everything you need to succeed in one
+                From progress tracking to AI insights, everything you need to succeed in one
                 intelligent platform.
               </p>
 
               <div className="checklist">
-                <div className="check-item"><span className="mark"><FiCheck /></span> Real-time progress tracking</div>
+                <div className="check-item"><span className="mark"><FiCheck /></span> Progress tracking &amp; milestone deadlines</div>
                 <div className="check-item"><span className="mark"><FiCheck /></span> AI feedback &amp; suggestions</div>
                 <div className="check-item"><span className="mark"><FiCheck /></span> Meeting scheduling &amp; reminders</div>
                 <div className="check-item"><span className="mark"><FiCheck /></span> Role-based access &amp; permissions</div>

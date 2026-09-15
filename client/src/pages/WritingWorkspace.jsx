@@ -14,7 +14,7 @@ import html2canvas from 'html2canvas'
 import jsPDF from 'jspdf'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import api from '../api/axios'
-import { getStoredToken, getStoredUser } from '../utils/storage'
+import { getStoredUser } from '../utils/storage'
 import {
   Undo2, Redo2, Printer, Eye, Download, Share2, Search, Replace, CheckCircle2,
   AlertCircle, AlertTriangle, Sparkles, Send,
@@ -26,11 +26,13 @@ import {
   HelpCircle, File, Home, Plus, Minus, Clipboard, Paintbrush, Hash,
   Lightbulb, CheckSquare, Clock, ChevronRight,
   PanelLeftClose, PanelLeftOpen, Scissors, Copy, Trash2,
-  Maximize2, Minimize2, Split, Brain,
+  Maximize2, Minimize2, Split, Brain, Upload,
 } from 'lucide-react'
 import { Link as LinkExtension } from '@tiptap/extension-link'
 import { Image as ImageExtension } from '@tiptap/extension-image'
 import { Table as TableExtension, TableRow, TableCell, TableHeader } from '@tiptap/extension-table'
+import { PageBreak } from '../editor/pageBreak'
+import { plainTextDocument, sanitizeEditorContent } from '../editor/contentGuards'
 import '../assets/css/writing-workspace.css'
 import '../assets/css/writing-pagination.css'
 import '../assets/css/writing-review.css'
@@ -78,20 +80,9 @@ const IndentExtension = Extension.create({
 })
 
 /**
- * PageBreak — inserts a horizontal rule styled as a page-break divider.
+ * Page break: a real node, so an imported Word document that contains one can be
+ * loaded at all. See client/src/editor/pageBreak.js.
  */
-const PageBreak = Extension.create({
-  name: 'pageBreak',
-  addCommands() {
-    return {
-      insertPageBreak: () => ({ chain }) =>
-        chain()
-          .insertContent({ type: 'horizontalRule' })
-          .insertContent({ type: 'paragraph' })
-          .run(),
-    }
-  },
-})
 
 const DOCUMENT_PREFIX = 'internsmart-report-v2-'
 
@@ -217,6 +208,10 @@ export default function WritingWorkspace() {
   const [workspaceError, setWorkspaceError] = useState('')
   const [title, setTitle] = useState('')
   const [isReadOnly, setIsReadOnly] = useState(false)
+  // Whether the *file* can be edited at all, as opposed to whether this user may
+  // edit it. A report uploaded as a PDF is view-only for its own author too, and
+  // the two cases need different explanations in the banner below.
+  const [fileFormat, setFileFormat] = useState({ fileType: null, editable: true })
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [savedAt, setSavedAt] = useState(null)
   const [saveStatus, setSaveStatus] = useState('Saved')
@@ -239,6 +234,18 @@ export default function WritingWorkspace() {
   const saveTimerRef = useRef(null)
   const pendingSaveRef = useRef(null)
 
+  // Mirrors `fileFormat.editable`, but immediately rather than after a re-render.
+  // The workspace loads a report's content in the same tick it learns the file is
+  // a view-only PDF, so a state update would land too late to stop the editor's
+  // update handler from queueing a save the server will refuse.
+  const fileEditableRef = useRef(true)
+
+  // Word (.docx) import/export. The picker is a hidden input triggered from the
+  // File tab, so the element has to live in a ref the ribbon handler can reach.
+  const wordInputRef = useRef(null)
+  const wordMessageTimerRef = useRef(null)
+  const [wordBusy, setWordBusy] = useState(false)
+
   const flushWorkspaceSave = useCallback(() => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current)
@@ -249,10 +256,23 @@ export default function WritingWorkspace() {
     pendingSaveRef.current = null
     if (!pending?.content || !pending?.reportId) return undefined
 
+    // A view-only PDF report has nothing to save into: the server answers 409.
+    if (!fileEditableRef.current) return undefined
+
     return api
       .put(`/workspace/reports/${pending.reportId}/workspace`, { documentContent: pending.content })
       .then(() => setSaveStatus('Saved'))
-      .catch(() => setSaveStatus('Offline - saved locally'))
+      .catch((error) => {
+        // A report whose converted content is too large for the database is not
+        // an offline blip. Reporting "saved locally" would leave a student
+        // believing work is safe that the server has explicitly refused.
+        if (error?.response?.data?.code === 'REPORT_CONTENT_TOO_LARGE') {
+          setSaveStatus('Not saved - report too large')
+          setWorkspaceError(error.response.data.message)
+          return
+        }
+        setSaveStatus('Offline - saved locally')
+      })
   }, [])
 
   useEffect(() => {
@@ -313,7 +333,10 @@ export default function WritingWorkspace() {
       FontFamily.configure({ types: ['textStyle'] }),
       Color.configure({ types: ['textStyle'] }),
       LinkExtension.configure({ openOnClick: false }),
-      ImageExtension,
+      // allowBase64: imported Word pictures are carried as data URIs (a .docx is
+      // the only source for its own images), and the extension refuses to parse
+      // data: sources by default.
+      ImageExtension.configure({ allowBase64: true }),
       TableExtension.configure({ resizable: true }),
       TableRow,
       TableCell,
@@ -361,16 +384,45 @@ export default function WritingWorkspace() {
         setComments(data.comments || [])
         setTitle(data.report.title || '')
         setIsReadOnly(Boolean(data.readOnly))
+        const editable = data.editable === undefined ? true : Boolean(data.editable)
+        fileEditableRef.current = editable
+        const loadedFileType = data.report?.fileType ?? data.fileType ?? null
+        setFileFormat({
+          fileType: loadedFileType,
+          editable,
+        })
+
+        // A PDF report does not belong in this editor at all any more: it has its
+        // own workspace, where the PDF file is displayed and edited directly.
+        // Every link that opens a report (My Reports, both supervisor dashboards)
+        // points here, so this is what makes "open the report" do the right thing
+        // for either format without every caller having to know the difference.
+        // `pdfWorkspace` is the server's own verdict; the file type is the
+        // fallback for payloads that predate it.
+        if (loadedFileType === 'pdf' || data.pdfWorkspace) {
+          navigate(`/pdf-workspace?reportId=${id}`, { replace: true })
+          return
+        }
         setPendingReportId((current) => current === id ? current : id)
         if (data.report.documentContent && editor) {
-          editor.commands.setContent(normalizeWorkspaceContent(data.report.documentContent))
+          // emitUpdate false is deliberate: Tiptap v3 emits an update by default,
+          // so simply *opening* a report scheduled a save of what had just been
+          // loaded. When the server had no content to give (a conversion that
+          // produced nothing) that write was the empty editor document, which then
+          // looked like finished content forever after. Loading a document is not
+          // editing it.
+          editor.commands.setContent(normalizeWorkspaceContent(data.report.documentContent), { emitUpdate: false })
           setSaveStatus('Saved')
         } else if (!data.report.documentContent) {
-          editor?.commands.setContent({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '' }] }] })
+          editor?.commands.setContent({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '' }] }] }, { emitUpdate: false })
           setSaveStatus('Saved')
         }
         const nextSections = pickOutline(data.sections, data.report?.documentContent)
         setSections(nextSections)
+        // An empty editor has to explain itself: the report's text could not be
+        // read from the uploaded file, and saying nothing makes it look like the
+        // workspace simply lost the report.
+        if (data.contentWarning) setWorkspaceError(data.contentWarning)
         initialLoadRef.current = true
       } catch (error) {
         setWorkspaceError(error.response?.data?.message || 'Unable to load this report workspace.')
@@ -385,7 +437,10 @@ export default function WritingWorkspace() {
       setSections(FALLBACK_OUTLINE)
       initialLoadRef.current = true
     }
-  }, [editor, reportId])
+    // `navigate` is a dependency because loading can hand the report to the PDF
+    // workspace; it does not cause a reload loop, because that navigation
+    // unmounts this page.
+  }, [editor, navigate, reportId])
 
   useEffect(() => {
     if (!editor || !pendingReportId) return
@@ -393,7 +448,8 @@ export default function WritingWorkspace() {
       try {
         const { data } = await api.get(`/workspace/reports/${pendingReportId}/workspace`)
         if (data.report.documentContent) {
-          editor.commands.setContent(normalizeWorkspaceContent(data.report.documentContent))
+          // Same reasoning as the load above: this is a load, not an edit.
+          editor.commands.setContent(normalizeWorkspaceContent(data.report.documentContent), { emitUpdate: false })
         }
       } catch {
         // ignore pending load errors
@@ -425,7 +481,11 @@ export default function WritingWorkspace() {
     return () => { persistence.destroy() }
   }, [yjsDoc, storageKey])
 
-  useEffect(() => { editor?.setEditable(!isReadOnly && !isPreview) }, [editor, isReadOnly, isPreview])
+  // emitUpdate false: setEditable also emits an update by default, and this runs
+  // on mount - i.e. while the editor is still empty and the report has not been
+  // fetched yet. With the default, opening a report scheduled a save of that empty
+  // document over the stored one.
+  useEffect(() => { editor?.setEditable(!isReadOnly && !isPreview, false) }, [editor, isReadOnly, isPreview])
 
   useEffect(() => {
     if (!reportId || !title || isReadOnly) return
@@ -455,6 +515,11 @@ export default function WritingWorkspace() {
     })
   }, [editor])
 
+  // "Export PDF" downloads a PDF of what is on screen. It deliberately does NOT
+  // upload that PDF as the report version the way it once did: an upload replaces
+  // the tracked report with a PDF, and a PDF is view-only in My Reports, so the
+  // export quietly turned the student's own editable report into one they could
+  // no longer edit. Exporting is a download; the editable report is untouched.
   const exportPdf = async () => {
     if (!paperRef.current) return
     try {
@@ -470,40 +535,141 @@ export default function WritingWorkspace() {
         pdf.addImage(pageCanvas.toDataURL('image/png'), 'PNG', 0, 0, 210, 297 * pageCanvas.height / pageHeight)
       }
 
-      const pdfBlob = new Blob([pdf.output('blob')], { type: 'application/pdf' })
-      const formData = new FormData()
-      formData.append('report', pdfBlob, `${title || 'internship-report'}.pdf`)
-      formData.append('title', title || 'Internship report')
-
-      const token = getStoredToken()
-      const response = await fetch('http://localhost:3000/api/students/reports', {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      })
-
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.message || 'Unable to upload report')
-
       pdf.save(`${title || 'internship-report'}.pdf`)
-
-      if (data.report?.id) {
-        const newReportId = String(data.report.id)
-        setReportId(newReportId)
-        await api.put(`/workspace/reports/${newReportId}/workspace`, { documentContent: editor?.getJSON() })
-        setWorkspaceError('Report exported and saved. You can continue editing this report here, or find it in My Reports.')
-        setTimeout(() => setWorkspaceError(''), 4000)
-      } else {
-        setWorkspaceError('Report exported. You can continue editing here, or find it in My Reports later.')
-        setTimeout(() => setWorkspaceError(''), 4000)
-      }
+      setWorkspaceError('PDF exported. Your editable report is unchanged — to track a PDF in My Reports, upload it there.')
+      setTimeout(() => setWorkspaceError(''), 6000)
     } catch (error) {
       console.error('PDF export error:', error)
       setWorkspaceError('PDF export failed. Please try again.')
     }
   }
 
-  const insertBlankPage = () => editor?.chain().focus().insertPageBreak().insertPageBreak().run()
+  // --- Word (.docx) round trip ---------------------------------------------
+  // Both directions go through /api/workspace/*: the import converts a .docx into
+  // editor content (and saves it to the report when the report already exists),
+  // the export turns the editor content into a real OOXML .docx. The older
+  // /reports/:id/word endpoint is still served for other clients, but a real
+  // .docx is what Word users expect, and it is the half that can be read back.
+  const WORD_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+
+  const showWordMessage = (message, timeout = 6000) => {
+    setWorkspaceError(message)
+    if (wordMessageTimerRef.current) clearTimeout(wordMessageTimerRef.current)
+    if (!message) return
+    wordMessageTimerRef.current = setTimeout(() => setWorkspaceError(''), timeout)
+  }
+
+  // A blob response hides the server's JSON error body, so it is read back out
+  // instead of showing the user "Unable to export" with no reason.
+  const wordErrorMessage = async (error, fallback) => {
+    const data = error?.response?.data
+    if (data instanceof Blob) {
+      try {
+        const parsed = JSON.parse(await data.text())
+        return parsed?.message || fallback
+      } catch {
+        return fallback
+      }
+    }
+    return data?.message || fallback
+  }
+
+  const wordFileName = () => `${(title || editor?.getText?.().slice(0, 60) || 'internship-report')
+    .replace(/[^a-z0-9 _-]/gi, '').trim().replace(/\s+/g, '-') || 'internship-report'}.docx`
+
+  const downloadWordFile = (blob, name) => {
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = name
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
+  const importWordDocument = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = '' // let the same file be picked again
+    if (!file) return
+
+    if (!/\.docx$/i.test(file.name) && file.type !== WORD_MIME) {
+      showWordMessage('Only Word (.docx) documents can be imported. In Word, use Save As and pick .docx first.')
+      return
+    }
+
+    // Importing into a PDF report is refused by the server (the archived file
+    // would no longer match the editable content). Saying so here saves a round
+    // trip and points at what actually works.
+    if (reportId && !fileFormat.editable) {
+      showWordMessage('This report was uploaded as a PDF and is view-only. Upload the Word (.docx) document as a new report version instead.')
+      return
+    }
+
+    setWordBusy(true)
+    try {
+      const formData = new FormData()
+      formData.append('document', file)
+      if (reportId) formData.append('reportId', String(reportId))
+
+      const { data } = await api.post('/workspace/import-word', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      if (!data?.documentContent) throw new Error(data?.message || 'That document had no readable content.')
+
+      const { content, dropped } = sanitizeEditorContent(data.documentContent, editor?.schema)
+      if (dropped) {
+        console.warn(`WORD IMPORT: ${dropped} element(s) are not supported by this editor and were kept as text.`)
+      }
+
+      try {
+        // setContent emits an update, so the outline refreshes and the imported
+        // text is saved exactly like typing it would have been.
+        editor?.commands.setContent(content, { emitUpdate: true })
+      } catch (contentError) {
+        // Never lose an import to one bad node: fall back to the plain text of the
+        // document rather than reporting a failure the user cannot act on.
+        console.error('WORD IMPORT CONTENT ERROR:', contentError)
+        editor?.commands.setContent(plainTextDocument(data.documentContent), { emitUpdate: true })
+      }
+      if (data.saved) setSaveStatus('Saved')
+
+      const skipped = [
+        data.warnings?.length ? `${data.warnings.length} element(s) kept as plain text` : '',
+        dropped ? `${dropped} unsupported element(s) kept as text` : '',
+      ].filter(Boolean)
+      showWordMessage(`${data.saved ? `Imported ${file.name} and saved it to this report.` : `Imported ${file.name} into the editor.`}${skipped.length ? ` (${skipped.join(', ')})` : ''}`)
+    } catch (error) {
+      showWordMessage(await wordErrorMessage(error, 'Unable to import that Word document.'))
+    } finally {
+      setWordBusy(false)
+    }
+  }
+
+  const exportWordDocument = async () => {
+    if (!editor) return
+    setWordBusy(true)
+    try {
+      // Anything still pending has to reach the database first: for an existing
+      // report the stored copy is what gets exported, so the download always
+      // matches the report on the server. A report that has never been saved has
+      // no row to read, so the live editor document is sent instead.
+      if (reportId) await flushWorkspaceSave()
+      const payload = reportId
+        ? { reportId: Number(reportId), title }
+        : { documentContent: editor.getJSON(), title }
+
+      const response = await api.post('/workspace/export-word', payload, { responseType: 'blob' })
+      downloadWordFile(new Blob([response.data], { type: WORD_MIME }), wordFileName())
+      showWordMessage('Word document exported. Open it in Word to keep working on it.')
+    } catch (error) {
+      showWordMessage(await wordErrorMessage(error, 'Unable to export this report as a Word document.'))
+    } finally {
+      setWordBusy(false)
+    }
+  }
+
+  const insertBlankPage = () => editor?.chain().focus().insertPageBreak({ blank: true }).insertPageBreak({ blank: true }).run()
 
   const addComment = async () => {
     if (!reportId || !commentBody.trim()) return
@@ -1032,6 +1198,65 @@ export default function WritingWorkspace() {
 
   const renderRibbonContent = () => {
     switch (activeTab) {
+      // Word-style File tab. There was previously no `file` case at all, so clicking
+      // File fell through to the default "under development" placeholder — which is
+      // why the menu appeared to have no options. Every entry is wired to a handler
+      // that already exists in this component.
+      case 'file': return (
+        <div className="ww-ribbon-content">
+          <div className="ww-ribbon-group">
+            <div className="ww-ribbon-group-title">Document</div>
+            <div className="ww-ribbon-buttons">
+              <ToolbarButton label="Save" onClick={() => flushWorkspaceSave()} title="Save the report now"><FileText size={16} /></ToolbarButton>
+              <ToolbarButton label="Print" onClick={() => window.print()} title="Print the report"><Printer size={16} /></ToolbarButton>
+              <ToolbarButton label="Share" onClick={handleShare} title="Share the report"><Share2 size={16} /></ToolbarButton>
+            </div>
+          </div>
+          <div className="ww-ribbon-group">
+            <div className="ww-ribbon-group-title">Word</div>
+            <div className="ww-ribbon-buttons">
+              <ToolbarButton
+                label="Import Word (.docx)"
+                title="Replace the content of this editor with a Word document"
+                disabled={isReadOnly || wordBusy}
+                onClick={() => wordInputRef.current?.click()}
+              >
+                <Upload size={16} />
+              </ToolbarButton>
+              <ToolbarButton
+                label="Export Word (.docx)"
+                title="Download this report as a Word document"
+                disabled={wordBusy}
+                onClick={exportWordDocument}
+              >
+                <Download size={16} />
+              </ToolbarButton>
+              <input
+                ref={wordInputRef}
+                type="file"
+                accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={importWordDocument}
+                style={{ display: 'none' }}
+              />
+            </div>
+          </div>
+          <div className="ww-ribbon-group">
+            <div className="ww-ribbon-group-title">Insert</div>
+            <div className="ww-ribbon-buttons">
+              <ToolbarButton label="Cover Page" onClick={handleInsertCoverPage} title="Insert a cover page"><Bookmark size={16} /></ToolbarButton>
+              <ToolbarButton label="Table of Contents" onClick={handleInsertTOC} title="Insert a table of contents"><BookOpen size={16} /></ToolbarButton>
+            </div>
+          </div>
+          <div className="ww-ribbon-group">
+            <div className="ww-ribbon-group-title">Info</div>
+            <div className="ww-ribbon-buttons">
+              <p style={{ color: 'var(--text-muted)', fontSize: '12px', maxWidth: '300px' }}>
+                Your work saves automatically a moment after you stop typing. Use Save to store it immediately.
+              </p>
+            </div>
+          </div>
+        </div>
+      )
       case 'home': return renderHomeRibbon()
       case 'insert': return renderInsertRibbon()
       case 'design': return renderDesignRibbon()
@@ -1099,6 +1324,8 @@ export default function WritingWorkspace() {
             {showMore && (
               <div className="ww-more-menu">
                 <button type="button" className="ww-more-item" onClick={() => { exportPdf(); setShowMore(false); }}>Export PDF</button>
+                <button type="button" className="ww-more-item" onClick={() => { exportWordDocument(); setShowMore(false); }}>Export Word (.docx)</button>
+                <button type="button" className="ww-more-item" onClick={() => { wordInputRef.current?.click(); setShowMore(false); }}>Import Word (.docx)</button>
                 <button type="button" className="ww-more-item" onClick={() => { window.print(); setShowMore(false); }}>Print</button>
                 <button type="button" className="ww-more-item" onClick={() => { setIsPreview(!isPreview); setShowMore(false); }}>{isPreview ? 'Exit Preview' : 'Preview'}</button>
               </div>
@@ -1130,7 +1357,8 @@ export default function WritingWorkspace() {
         {renderRibbonContent()}
       </div>
 
-      {/* Read-only banner for supervisors */}
+      {/* Read-only banner. A PDF report is read-only even for its own author, and
+          saying "for supervisors" there would be actively misleading. */}
       {isReadOnly && (
         <div style={{
           display: 'flex',
@@ -1144,7 +1372,14 @@ export default function WritingWorkspace() {
           fontWeight: 500,
         }}>
           <Lock size={13} />
-          <span>You are viewing this report in <strong>read-only</strong> mode. You can leave comments in the Assistant panel on the right.</span>
+          {fileFormat.editable ? (
+            <span>You are viewing this report in <strong>read-only</strong> mode. You can leave comments in the Assistant panel on the right.</span>
+          ) : (
+            <span>
+              This report was uploaded as a <strong>PDF</strong>, so it is view-only. Upload it as a Word
+              (.docx) document to edit it in the workspace.
+            </span>
+          )}
         </div>
       )}
 
@@ -1271,7 +1506,13 @@ export default function WritingWorkspace() {
                   )}
                   <div className="ww-assistant-privacy">
                     <Lock size={14} />
-                    <span>{isReadOnly ? 'This report is read-only for supervisors.' : 'Only assigned supervisors can review this report.'}</span>
+                    <span>
+                      {!fileFormat.editable
+                        ? 'This report was uploaded as a PDF and is view-only.'
+                        : isReadOnly
+                          ? 'This report is read-only for supervisors.'
+                          : 'Only assigned supervisors can review this report.'}
+                    </span>
                   </div>
                 </>
               )}

@@ -15,6 +15,7 @@ import {
   X,
   LogOut,
   User,
+  Video,
 } from 'lucide-react'
 import '../assets/css/dashboard.css'
 import '../assets/css/dashboard-components.css'
@@ -210,34 +211,70 @@ if (userError || !user) {
             
             <div className="notification-center relative">
               <button
-                className="notification-btn cursor-pointer"
+                className="notification-btn cursor-pointer relative"
                 onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
               >
                 <Bell size={20} />
+                {notifications.some((n) => !n.isRead) && (
+                  <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-[#F5A623]"></span>
+                  </span>
+                )}
               </button>
 
               {isNotificationsOpen && (
-                <div className="absolute right-0 mt-2 w-72 rounded-xl border p-3 shadow-2xl z-50 text-xs" style={{
+                <div className="absolute right-0 mt-2 w-80 rounded-xl border p-3 shadow-2xl z-50 text-xs" style={{
                   backgroundColor: 'var(--bg-panel)',
                   borderColor: 'var(--line)',
                   color: 'var(--text)'
                 }}>
-                  <div className="font-semibold text-sm border-b pb-2 mb-2" style={{ borderColor: 'var(--line)' }}>Notifications</div>
-                  <div className="space-y-2">
+                  <div className="font-semibold text-sm border-b pb-2 mb-2 flex items-center justify-between" style={{ borderColor: 'var(--line)' }}>
+                    <span>Notifications</span>
+                    {notifications.filter((n) => !n.isRead).length > 0 && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold text-white bg-[#F5A623]">
+                        {notifications.filter((n) => !n.isRead).length} new
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-2 max-h-80 overflow-y-auto">
                     {loadingNotifications ? (
                       <p className="text-center py-2" style={{ color: 'var(--text-muted)' }}>Loading...</p>
                     ) : notifications.length === 0 ? (
                       <p className="text-center py-2" style={{ color: 'var(--text-muted)' }}>No notifications yet.</p>
                     ) : (
-                      notifications.slice(0, 5).map((notif) => (
+                      notifications.slice(0, 8).map((notif) => (
                         <div
                           key={notif.id}
-                          className="p-2 rounded cursor-pointer hover:bg-white/10"
-                          style={{ backgroundColor: notif.isRead ? 'transparent' : 'rgba(255,255,255,0.05)' }}
+                          className="p-2.5 rounded-xl cursor-pointer transition border"
+                          style={{
+                            backgroundColor: notif.isRead ? 'transparent' : 'rgba(245,166,35,0.08)',
+                            borderColor: notif.meetingLink && !notif.isRead ? '#F5A623' : 'var(--line)'
+                          }}
                           onClick={() => handleMarkNotificationRead(notif.id)}
                         >
-                          <p className="font-medium" style={{ color: 'var(--orange-3)' }}>{notif.title}</p>
-                          <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{notif.message}</p>
+                          <div className="flex items-center justify-between">
+                            <p className="font-semibold text-xs" style={{ color: 'var(--orange-3)' }}>{notif.title}</p>
+                            <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                              {notif.createdAt ? new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                            </span>
+                          </div>
+                          <p className="text-[11px] mt-1 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{notif.message}</p>
+
+                          {notif.meetingLink && (
+                            <button
+                              type="button"
+                              className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white shadow transition cursor-pointer hover:opacity-90"
+                              style={{ backgroundColor: '#F5A623', border: 'none' }}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleMarkNotificationRead(notif.id)
+                                window.open(notif.meetingLink, '_blank', 'noopener,noreferrer')
+                              }}
+                            >
+                              <Video size={14} /> Join Now (Jitsi Meet)
+                            </button>
+                          )}
                         </div>
                       ))
                     )}
@@ -296,6 +333,42 @@ if (userError || !user) {
 
         {/* Dashboard Content */}
         <main className="dashboard-content">
+          {/* Live Meeting Alert Banner */}
+          {(() => {
+            const activeNotif = notifications.find((n) => !n.isRead && n.meetingLink)
+            if (!activeNotif) return null
+
+            return (
+              <div
+                className="mb-6 p-4 rounded-2xl flex items-center justify-between shadow-xl border border-[#F5A623] transition animate-pulse"
+                style={{ background: 'linear-gradient(135deg, rgba(245,166,35,0.2), rgba(20,25,35,0.95))' }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-3 rounded-xl bg-[#F5A623] text-white shadow-md">
+                    <Video size={24} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-white flex items-center gap-2">
+                      <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span>
+                      {activeNotif.title || 'Meeting Started!'}
+                    </h4>
+                    <p className="text-xs text-gray-300 mt-0.5">{activeNotif.message}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    handleMarkNotificationRead(activeNotif.id)
+                    window.open(activeNotif.meetingLink, '_blank', 'noopener,noreferrer')
+                  }}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold text-white shadow-lg cursor-pointer hover:scale-105 transition"
+                  style={{ backgroundColor: '#F5A623' }}
+                >
+                  <Video size={16} /> Join Now
+                </button>
+              </div>
+            )
+          })()}
+
           {/* Dashboard Header Section */}
           <section className="dashboard-header-section">
             <div className="greeting-area">

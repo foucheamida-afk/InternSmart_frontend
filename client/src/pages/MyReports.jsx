@@ -3,7 +3,11 @@ import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import Sidebar from '../components/Sidebar'
 import ThemeToggle from '../components/ThemeToggle'
+import SubmissionStatusPanel from '../components/reports/SubmissionStatusPanel'
 import { useTheme } from '../context/ThemeContext'
+import { useAuth } from '../context/AuthContext'
+import { getStoredToken, clearStoredAuth } from '../utils/storage'
+import { API_BASE, API_ORIGIN } from '../services/apiBase'
 import '../assets/css/dashboard.css'
 import '../assets/css/dashboard-components.css'
 import {
@@ -16,6 +20,7 @@ import {
   Download,
   Eye,
   FileText,
+  FileSearch,
   Filter,
   History,
   LoaderCircle,
@@ -36,8 +41,27 @@ import {
   PenLine,
 } from 'lucide-react'
 
-const REPORT_ENDPOINTS = ['http://localhost:3000/api/students/my-reports']
+const REPORT_ENDPOINTS = [`${API_BASE}/students/my-reports`]
 const STATUS_ORDER = ['submitted', 'ai_analysis', 'in_review', 'approved', 'needs_revision', 'rejected']
+
+// Both formats may be uploaded, but they are not equally usable: a Word document
+// is converted into editable content and opens in the writing workspace, while a
+// PDF can only be viewed and downloaded. The server decides this from the stored
+// file (utils/documentTypes.js) and sends `fileType`/`editable` with every
+// report; the helpers below only cover the case where an older payload lacks it.
+const MAX_REPORT_MB = 10
+const ACCEPTED_UPLOAD_EXTENSIONS = ['.pdf', '.docx']
+const FILE_KIND_META = {
+  docx: { label: 'Word', editable: true },
+  pdf: { label: 'PDF', editable: false },
+}
+
+const fileKindFromName = (fileName) => {
+  const extension = String(fileName || '').toLowerCase().match(/\.[a-z0-9]+$/)?.[0]
+  if (extension === '.docx') return 'docx'
+  if (extension === '.pdf') return 'pdf'
+  return null
+}
 
 const STATUS_META = {
   submitted: { label: 'Submitted', color: 'bg-white/5 text-white/80 border-white/10', lightColor: 'bg-black/5 text-black/80 border-black/10' },
@@ -89,11 +113,20 @@ const normalizeReport = (raw = {}) => {
   const title = raw.title || raw.reportTitle || raw.fileName || raw.file_name || 'Untitled report'
   const fileName = raw.fileName || raw.file_name || raw.filename || 'report.pdf'
   const status = normalizeStatus(raw.status || raw.state)
+  const fileType = raw.fileType || raw.file_type || fileKindFromName(fileName)
 
   return {
     id: raw.id || raw._id || raw.reportId || `${Date.now()}-${Math.random()}`,
     title,
     fileName,
+    // `editable` is the server's answer to "can this file be edited as editor
+    // content?" - only a Word report can. A PDF is edited in its own workspace
+    // instead, where the file itself is the document, so the two questions are
+    // kept apart deliberately: `isPdf` routes the report, `editable` does not.
+    fileType,
+    isPdf: fileType === 'pdf',
+    editable: typeof raw.editable === 'boolean' ? raw.editable : fileType === 'docx',
+    fileUrl: raw.fileUrl || raw.url || raw.downloadUrl || null,
     version: Number(raw.version || raw.reportVersion || 1),
     submittedAt: raw.submittedAt || raw.createdAt || raw.uploadedAt || null,
     updatedAt: raw.updatedAt || raw.lastUpdated || raw.submittedAt || raw.createdAt || null,
@@ -101,13 +134,32 @@ const normalizeReport = (raw = {}) => {
     progress: typeof raw.progress === 'number' ? raw.progress : undefined,
     currentStage: raw.currentStage || raw.stage || status,
     aiScore: raw.aiScore ?? raw.ai_score ?? raw.aiAnalysis?.score ?? null,
-    fileUrl: raw.fileUrl || raw.url || raw.downloadUrl || null,
     supervisor: raw.supervisor || raw.assignedSupervisor || null,
     feedback: raw.supervisorFeedback || raw.feedback || raw.latestFeedback || null,
     activity: Array.isArray(raw.activity) ? raw.activity : Array.isArray(raw.timeline) ? raw.timeline : [],
     aiAnalysis: raw.aiAnalysis || raw.ai_analysis || null,
     versions: Array.isArray(raw.versions) ? raw.versions.map(normalizeReport) : [],
   }
+}
+
+/** Uploaded files are served from the server root, not under /api. */
+const reportFileUrl = (report) => (report?.fileUrl ? `${API_ORIGIN}${report.fileUrl}` : null)
+
+const openReportFile = (report) => {
+  const url = reportFileUrl(report)
+  if (!url) return
+  window.open(url, '_blank', 'noopener')
+}
+
+const downloadReportFile = (report) => {
+  const url = reportFileUrl(report)
+  if (!url) return
+  const link = document.createElement('a')
+  link.href = url
+  link.download = report.fileName || report.title || 'report'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
 }
 
 const getReportRoutes = async (token) => {
@@ -176,6 +228,32 @@ const StatusBadge = ({ status }) => {
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em] ${meta.color}`}>
       {meta.label}
+    </span>
+  )
+}
+
+// Says which file a report actually is, and therefore what may be done with it.
+// Both formats open in a workspace now, but not the same one: a Word report is
+// converted into editor content, a PDF is worked on as the file it is.
+const FileKindBadge = ({ report }) => {
+  const editable = Boolean(report.editable) || Boolean(report.isPdf)
+  const label = FILE_KIND_META[report.fileType]?.label || 'File'
+
+  return (
+    <span
+      className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em]"
+      style={{
+        borderColor: editable ? 'rgba(255, 122, 0, 0.35)' : 'var(--line)',
+        backgroundColor: editable ? 'rgba(255, 122, 0, 0.1)' : 'rgba(255,255,255,0.04)',
+        color: editable ? 'var(--orange-3)' : 'var(--text-muted)',
+      }}
+      title={report.isPdf
+        ? 'PDF — opens in the PDF workspace, where the text is editable and every save rewrites the file'
+        : editable
+          ? 'Word document — opens in the writing workspace for editing'
+          : 'This file cannot be edited here'}
+    >
+      {label} · {report.isPdf ? 'Editable PDF' : editable ? 'Editable' : 'View only'}
     </span>
   )
 }
@@ -296,7 +374,7 @@ const ReportStatistics = ({ reports }) => {
   )
 }
 
-const ReportCard = ({ report, isSelected, onSelect, onOpenWorkspace, onDelete }) => (
+const ReportCard = ({ report, isSelected, onSelect, onOpenWorkspace, onOpenFile, onDelete }) => (
   <motion.div
     role="button"
     tabIndex={0}
@@ -328,6 +406,9 @@ const ReportCard = ({ report, isSelected, onSelect, onOpenWorkspace, onDelete })
           <div className="min-w-0">
             <h3 className="truncate text-base font-medium">{report.title}</h3>
             <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>Version {report.version || 1} • {formatRelativeDate(report.updatedAt || report.submittedAt)}</p>
+            <div className="mt-2">
+              <FileKindBadge report={report} />
+            </div>
           </div>
 
           <StatusBadge status={report.status} />
@@ -359,6 +440,10 @@ const ReportCard = ({ report, isSelected, onSelect, onOpenWorkspace, onDelete })
             >
               <Trash2 size={12} />
             </button>
+            {/* Every report opens in a workspace now - Word in the writing
+                workspace, a PDF in the PDF workspace - and a PDF additionally
+                keeps the plain "open the file" action, because a reader may just
+                want to look at the document as it stands. */}
             <button
               type="button"
               onClick={(event) => { event.stopPropagation(); onOpenWorkspace?.(report); }}
@@ -368,10 +453,25 @@ const ReportCard = ({ report, isSelected, onSelect, onOpenWorkspace, onDelete })
                 color: 'var(--orange-3)',
                 backgroundColor: 'rgba(255, 122, 0, 0.1)'
               }}
-              title="Open in writing workspace"
+              title={report.isPdf ? 'Open in the PDF workspace' : 'Open in the writing workspace'}
             >
               <PenLine size={12} />
             </button>
+            {report.isPdf && (
+              <button
+                type="button"
+                onClick={(event) => { event.stopPropagation(); onOpenFile?.(report); }}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border transition"
+                style={{
+                  borderColor: 'var(--line)',
+                  color: 'var(--text-muted)',
+                  backgroundColor: 'rgba(255,255,255,0.04)'
+                }}
+                title="Open the PDF file itself"
+              >
+                <Eye size={12} />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -444,7 +544,12 @@ const ReportFilters = ({ searchQuery, setSearchQuery, statusFilter, setStatusFil
   </div>
 )
 
-const ReportDetails = ({ report, onSendToSupervisor, onSendToAi, actionLoading, onOpenSupervisorModal }) => {
+const ReportDetails = ({ report, onSendToSupervisor, onSendToAi, actionLoading, onOpenSupervisorModal, onOpenFile, onOpenWorkspace }) => {
+  // Called before the early return below, as hooks must be. `navigate` was
+  // already used by the integrity-analysis button without ever being defined in
+  // this component, so the button threw on click.
+  const navigate = useNavigate()
+
   if (!report) {
     return (
       <div className="flex h-full min-h-[420px] items-center justify-center rounded-[24px] border border-dashed p-8 text-center" style={{
@@ -463,6 +568,14 @@ const ReportDetails = ({ report, onSendToSupervisor, onSendToAi, actionLoading, 
   const details = [
     { label: 'Title', value: report.title },
     { label: 'File name', value: report.fileName },
+    {
+      label: 'File type',
+      value: report.fileType
+        ? `${FILE_KIND_META[report.fileType]?.label || 'File'} — ${
+          report.isPdf ? 'editable in the PDF workspace' : report.editable ? 'editable in the workspace' : 'view only'
+        }`
+        : '—',
+    },
     { label: 'Version', value: `Version ${report.version || 1}` },
     { label: 'Submitted date', value: formatDate(report.submittedAt) },
     { label: 'Last updated', value: formatDate(report.updatedAt || report.submittedAt) },
@@ -544,6 +657,28 @@ const ReportDetails = ({ report, onSendToSupervisor, onSendToAi, actionLoading, 
         </div>
       </div>
 
+      {/* Two-stage submission: request review, track approvals, submit final */}
+      <div className="mt-6">
+        <SubmissionStatusPanel reportId={report.id} />
+      </div>
+
+      {/* Integrity analysis: what the report matched, and what was excluded. */}
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={() => navigate(`/plagiarism/${report.id}`)}
+          className="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition"
+          style={{
+            borderColor: 'rgba(255,122,0,0.35)',
+            backgroundColor: 'rgba(255,122,0,0.08)',
+            color: 'var(--orange-3)',
+          }}
+        >
+          <FileSearch className="h-4 w-4" />
+          View integrity analysis
+        </button>
+      </div>
+
       <div className="mt-6 flex flex-wrap gap-3">
         {report.status === 'submitted' && (
           <>
@@ -614,26 +749,65 @@ const ReportDetails = ({ report, onSendToSupervisor, onSendToAi, actionLoading, 
           </span>
         )}
 
-        <button type="button" className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm" style={{
-          borderColor: 'var(--line)',
-          backgroundColor: 'var(--bg-panel)',
-          color: 'var(--text-soft)'
-        }}>
-          <Download className="h-4 w-4" />
-          Download
-        </button>
-        <a
-          href={`/writing-workspace?reportId=${report.id}`}
-          className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5"
+        <button
+          type="button"
+          onClick={() => downloadReportFile(report)}
+          disabled={!report.fileUrl}
+          className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
           style={{
-            borderColor: 'rgba(255, 122, 0, 0.35)',
-            backgroundColor: 'rgba(255, 122, 0, 0.08)',
-            color: 'var(--orange-3)'
+            borderColor: 'var(--line)',
+            backgroundColor: 'var(--bg-panel)',
+            color: 'var(--text-soft)'
           }}
         >
-          <PenLine className="h-4 w-4" />
-          Open in Workspace
-        </a>
+          <Download className="h-4 w-4" />
+          {report.editable ? 'Download Word' : 'Download PDF'}
+        </button>
+
+        {/* Both formats now have a workspace: Word is edited as editor content,
+            a PDF as the file itself. A PDF keeps the raw "view the file" action
+            as well, for reading without opening a workspace. */}
+        {report.editable || report.isPdf ? (
+          <button
+            type="button"
+            onClick={() => onOpenWorkspace?.(report)}
+            className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5"
+            style={{
+              borderColor: 'rgba(255, 122, 0, 0.35)',
+              backgroundColor: 'rgba(255, 122, 0, 0.08)',
+              color: 'var(--orange-3)'
+            }}
+          >
+            <PenLine className="h-4 w-4" />
+            {report.isPdf ? 'Open in PDF Workspace' : 'Open in Workspace'}
+          </button>
+        ) : null}
+        {report.isPdf ? (
+          <>
+            <button
+              type="button"
+              onClick={() => onOpenFile?.(report)}
+              disabled={!report.fileUrl}
+              className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
+              style={{
+                borderColor: 'var(--line)',
+                backgroundColor: 'rgba(255,255,255,0.04)',
+                color: 'var(--text-soft)'
+              }}
+            >
+              <Eye className="h-4 w-4" />
+              View the PDF file
+            </button>
+            <span className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs" style={{
+              borderColor: 'rgba(255, 122, 0, 0.25)',
+              backgroundColor: 'rgba(255, 122, 0, 0.06)',
+              color: 'var(--text-muted)'
+            }}>
+              An uploaded PDF opens as a real PDF: its text is read into the workspace, you and your
+              supervisors edit it together, and every save rewrites this file.
+            </span>
+          </>
+        ) : null}
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
@@ -734,15 +908,23 @@ const UploadReportModal = ({ isOpen, onClose, onUploadSuccess }) => {
   const handleFile = (file) => {
     if (!file) return
 
-    const extension = file.name.toLowerCase().split('.').pop()
-    if (extension !== 'pdf') {
-      setError('Only PDF files are supported.')
+    const extension = `.${file.name.toLowerCase().split('.').pop()}`
+
+    // Legacy .doc is a different format the server cannot read, so it is worth
+    // its own message rather than a generic "not supported".
+    if (extension === '.doc') {
+      setError('Legacy .doc files are not supported. Open the file in Word, save it as .docx, then upload it again.')
       return
     }
 
-    const sizeOk = !file.size || file.size <= 20 * 1024 * 1024
+    if (!ACCEPTED_UPLOAD_EXTENSIONS.includes(extension)) {
+      setError('Only PDF and Word (.docx) files are supported.')
+      return
+    }
+
+    const sizeOk = !file.size || file.size <= MAX_REPORT_MB * 1024 * 1024
     if (!sizeOk) {
-      setError('This file exceeds the supported size limit.')
+      setError(`This file exceeds the ${MAX_REPORT_MB} MB size limit.`)
       return
     }
 
@@ -762,12 +944,12 @@ const UploadReportModal = ({ isOpen, onClose, onUploadSuccess }) => {
     setUploadProgress(35)
 
     try {
-      const token = localStorage.getItem('token')
+      const token = getStoredToken()
       const formData = new FormData()
       formData.append('report', selectedFile)
       formData.append('title', selectedFile.name.replace(/\.[^/.]+$/, ''))
 
-      const response = await fetch('http://localhost:3000/api/students/reports', {
+      const response = await fetch(`${API_BASE}/students/reports`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
@@ -868,11 +1050,13 @@ const UploadReportModal = ({ isOpen, onClose, onUploadSuccess }) => {
                 <input
                   ref={inputRef}
                   type="file"
-                  accept=".pdf"
+                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   className="hidden"
                   onChange={(event) => handleFile(event.target.files?.[0])}
                 />
-                <p className="mt-4 text-xs" style={{ color: 'var(--text-muted)' }}>Supported formats: PDF only</p>
+                <p className="mt-4 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Supported formats: PDF or Word (.docx) · up to {MAX_REPORT_MB} MB
+                </p>
               </>
             ) : (
               <div className="flex items-center justify-between gap-4 rounded-2xl border p-4 text-left" style={{
@@ -908,6 +1092,14 @@ const UploadReportModal = ({ isOpen, onClose, onUploadSuccess }) => {
               </div>
             )}
           </div>
+
+          {/* The two formats behave differently once uploaded, and finding that
+              out after the fact is what this line prevents. */}
+          <p className="mt-4 text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            Word (.docx) reports open in the writing workspace, where you can keep editing them.
+            A PDF opens in the <strong style={{ color: 'var(--text-soft)' }}>PDF workspace</strong>: its text is read into
+            an editable document, your supervisors can work on it with you in real time, and every save rewrites the PDF file.
+          </p>
 
           {error && (
             <div className="mt-4 flex items-center gap-2 rounded-xl border px-3 py-2 text-sm" style={{
@@ -990,17 +1182,19 @@ export default function MyReports() {
   const [loading, setLoading] = useState(false)
   const [showProfileOverview, setShowProfileOverview] = useState(false)
 
+  const { logout } = useAuth()
+
   useEffect(() => {
     const fetchStudentProfile = async () => {
       try {
-        const token = localStorage.getItem('token')
+        const token = getStoredToken()
 
         if (!token) {
           navigate('/login')
           return
         }
 
-        const response = await fetch('http://localhost:3000/api/students/me', {
+        const response = await fetch(`${API_BASE}/students/me`, {
           method: 'GET',
           headers: {
             Authorization: `Bearer ${token}`,
@@ -1014,8 +1208,7 @@ export default function MyReports() {
           console.error('STUDENT PROFILE ERROR:', data)
 
           if (response.status === 401) {
-            localStorage.removeItem('token')
-            localStorage.removeItem('user')
+            clearStoredAuth()
             navigate('/login')
             return
           }
@@ -1039,25 +1232,35 @@ export default function MyReports() {
   const [error, setError] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
+  const [notice, setNotice] = useState('')
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [supervisorModal, setSupervisorModal] = useState({ open: false, reportId: null, type: 'academic' })
 
   const openWorkspace = (report) => {
     if (!report?.id) return
+    // A PDF is not converted into editor content: it opens in the PDF workspace,
+    // where the file is displayed and the extracted text is edited in place.
+    if (report.isPdf) {
+      navigate(`/pdf-workspace?reportId=${report.id}`)
+      return
+    }
+    if (!report.editable) {
+      setNotice(`${report.fileName || report.title} cannot be opened for editing. Upload it as a PDF or a Word (.docx) document.`)
+      return
+    }
     navigate(`/writing-workspace?reportId=${report.id}`)
   }
 
   const handleSignOut = () => {
-    localStorage.removeItem('internSmart_user')
-    localStorage.removeItem('token')
+    logout()
     navigate('/login')
   }
 
   const fetchReports = async () => {
     try {
       setLoading(true)
-      const token = localStorage.getItem('token')
+      const token = getStoredToken()
       const data = await getReportRoutes(token)
       setReports(data)
       setSelectedReportId((current) => current || (data[0]?.id || null))
@@ -1069,16 +1272,21 @@ export default function MyReports() {
   }
 
   const handleUploadSuccess = (newReport) => {
-    if (newReport) {
-      setReports((prev) => {
-        const filtered = prev.filter((r) => r.id !== newReport.id)
-        return [newReport, ...filtered]
-      })
-      setSelectedReportId(newReport.id)
-      openWorkspace(newReport)
-    } else {
+    if (!newReport) {
       fetchReports()
+      return
     }
+
+    setReports((prev) => {
+      const filtered = prev.filter((r) => r.id !== newReport.id)
+      return [newReport, ...filtered]
+    })
+    setSelectedReportId(newReport.id)
+
+    // Either format opens straight into its workspace: Word into the writing
+    // workspace, a PDF into the PDF workspace where its text becomes editable.
+    setNotice('')
+    openWorkspace(newReport)
   }
 
   const handleDeleteReport = async (id) => {
@@ -1087,8 +1295,8 @@ export default function MyReports() {
     if (!confirmed) return
 
     try {
-      const token = localStorage.getItem('token')
-      const response = await fetch(`http://localhost:3000/api/students/reports/${id}`, {
+      const token = getStoredToken()
+      const response = await fetch(`${API_BASE}/students/reports/${id}`, {
         method: 'DELETE',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
@@ -1107,8 +1315,8 @@ export default function MyReports() {
     setActionLoading(true)
     setError('')
     try {
-      const token = localStorage.getItem('token')
-      const response = await fetch(`http://localhost:3000/api/students/reports/${id}/send-to-supervisor?type=${type}`, {
+      const token = getStoredToken()
+      const response = await fetch(`${API_BASE}/students/reports/${id}/send-to-supervisor?type=${type}`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
@@ -1128,8 +1336,8 @@ export default function MyReports() {
     setActionLoading(true)
     setError('Analysing your report with AI… this may take up to 30 seconds.')
     try {
-      const token = localStorage.getItem('token')
-      const response = await fetch(`http://localhost:3000/api/students/reports/${id}/send-to-ai`, {
+      const token = getStoredToken()
+      const response = await fetch(`${API_BASE}/students/reports/${id}/send-to-ai`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
@@ -1288,6 +1496,27 @@ export default function MyReports() {
             </div>
           )}
 
+          {/* Informational, not an error: it explains why a report did not open
+              in a workspace. Styled apart from the red failure banner so a
+              report that was uploaded fine is not read as a failure. */}
+          {notice && !error && (
+            <div className="mb-6 flex items-start justify-between gap-3 rounded-2xl border p-4 text-sm" style={{
+              borderColor: 'rgba(255, 122, 0, 0.3)',
+              backgroundColor: 'rgba(255, 122, 0, 0.08)',
+              color: 'var(--text-soft)'
+            }}>
+              <span>{notice}</span>
+              <button
+                type="button"
+                onClick={() => setNotice('')}
+                className="shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium"
+                style={{ borderColor: 'var(--line)', color: 'var(--text-muted)' }}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {!reports.length && !error ? (
             <EmptyReportsState onUploadClick={() => setIsUploadModalOpen(true)} />
           ) : (
@@ -1318,6 +1547,7 @@ export default function MyReports() {
                         isSelected={selectedReport?.id === report.id}
                         onSelect={setSelectedReportId}
                         onOpenWorkspace={openWorkspace}
+                        onOpenFile={openReportFile}
                         onDelete={handleDeleteReport}
                       />
                     ))}
@@ -1329,6 +1559,8 @@ export default function MyReports() {
                     onSendToAi={handleSendToAi}
                     actionLoading={actionLoading}
                     onOpenSupervisorModal={(id) => setSupervisorModal({ open: true, reportId: id, type: 'academic' })}
+                    onOpenFile={openReportFile}
+                    onOpenWorkspace={openWorkspace}
                   />
                 </div>
               )}

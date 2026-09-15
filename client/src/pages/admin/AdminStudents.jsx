@@ -183,6 +183,18 @@ export default function AdminStudents() {
 
   useEffect(() => { fetchStudents() }, [page, search, location.pathname])
 
+  const handleDeleteStudent = async (student) => {
+    const userId = student.user?.id
+    if (!userId) return
+    if (!window.confirm(`Are you sure you want to delete student "${student.user?.name || 'this student'}"? This will remove them everywhere in the app.`)) return
+    try {
+      await adminApi.deleteUser(userId)
+      setStudents(prev => prev.filter(s => s.id !== student.id))
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Failed to delete student')
+    }
+  }
+
   /* ── file helpers ── */
   const acceptFile = (file) => {
     if (!file) return
@@ -329,6 +341,7 @@ export default function AdminStudents() {
                     <th className="pb-3 font-semibold px-4">Academic Supervisor</th>
                     <th className="pb-3 font-semibold px-4">Professional Supervisor</th>
                     <th className="pb-3 font-semibold px-4">Company</th>
+                    <th className="pb-3 font-semibold px-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: 'var(--line)' }}>
@@ -341,6 +354,15 @@ export default function AdminStudents() {
                       <td className="py-3.5 px-4">{s.internship?.academicSupervisor?.name || '—'}</td>
                       <td className="py-3.5 px-4">{s.internship?.professionalSupervisor?.name || '—'}</td>
                       <td className="py-3.5 px-4">{s.internship?.company || '—'}</td>
+                      <td className="py-3.5 px-4 text-right">
+                        <button
+                          onClick={() => handleDeleteStudent(s)}
+                          title="Delete Student"
+                          className="p-1.5 rounded-lg border border-red-500/20 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition cursor-pointer"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

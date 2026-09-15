@@ -30,14 +30,10 @@ const Login = () => {
   const [serverError, setServerError] = useState("");
   const initializedRef = useRef(false);
 
-  // Clear form on mount
+  // Clear errors on mount
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
-    setValues({
-      email: "",
-      password: "",
-    });
     setErrors({});
     setServerError("");
   }, []);
@@ -65,18 +61,19 @@ const Login = () => {
   // =========================
   // VALIDATION
   // =========================
-  const validate = () => {
+  const validate = (emailVal = values.email, passwordVal = values.password) => {
     const newErrors = {};
+    const emailCheck = (emailVal || "").trim();
 
-    if (!values.email.trim()) {
+    if (!emailCheck) {
       newErrors.email = "Email address is required";
     } else if (
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailCheck)
     ) {
       newErrors.email = "Please enter a valid email address";
     }
 
-    if (!values.password) {
+    if (!passwordVal) {
       newErrors.password = "Password is required";
     }
 
@@ -91,12 +88,15 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    const formEmail = (values.email || e.target.email?.value || "").trim();
+    const formPassword = values.password || e.target.password?.value || "";
+
     console.log("LOGIN FORM SUBMITTED");
 
     setServerError("");
 
     // Validate form
-    if (!validate()) {
+    if (!validate(formEmail, formPassword)) {
       console.log("VALIDATION FAILED");
       return;
     }
@@ -112,8 +112,8 @@ const Login = () => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            email: values.email.trim(),
-            password: values.password,
+            email: formEmail,
+            password: formPassword,
           }),
         }
       );
@@ -156,6 +156,21 @@ const Login = () => {
         );
 
         navigate("/change-password");
+        return;
+      }
+
+      // =========================
+      // FIRST LOGIN FOR A NEWLY PROVISIONED SUPERVISOR
+      // =========================
+      // A supervisor account created on demand confirms its profile before
+      // reaching the dashboard. `data.user` already carries the flag, so it was
+      // persisted by login() above and ProtectedRoute will hold them here.
+      if (data.requiresOnboarding === true) {
+        console.log(
+          "➡️ REDIRECTING TO PROFILE ONBOARDING"
+        );
+
+        navigate("/onboarding");
         return;
       }
 
@@ -288,7 +303,7 @@ const Login = () => {
             onSubmit={handleSubmit}
             className="space-y-5"
             noValidate
-            autoComplete="off"
+            autoComplete="on"
           >
 
             {/* EMAIL */}
@@ -315,9 +330,10 @@ const Login = () => {
                   id="email"
                   name="email"
                   type="email"
-                  autoComplete="off"
+                  autoComplete="username email"
                   value={values.email}
                   onChange={handleChange}
+                  onInput={handleChange}
                   className={`w-full rounded-2xl border bg-white py-3 pl-10 pr-4 text-sm text-slate-900 outline-none transition ${
                     errors.email
                       ? "border-red-400 ring-2 ring-red-400/20"
@@ -368,9 +384,10 @@ const Login = () => {
                       ? "text"
                       : "password"
                   }
-                  autoComplete="off"
+                  autoComplete="current-password"
                   value={values.password}
                   onChange={handleChange}
+                  onInput={handleChange}
                   className={`w-full rounded-2xl border bg-white py-3 pl-10 pr-10 text-sm text-slate-900 outline-none transition ${
                     errors.password
                       ? "border-red-400 ring-2 ring-red-400/20"

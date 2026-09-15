@@ -146,6 +146,9 @@ const ChangePassword = () => {
 
       if (user) {
         user.mustChangePassword = false;
+        // A freshly provisioned supervisor still has to confirm their profile;
+        // carrying the flag here lets ProtectedRoute keep them on the gate.
+        user.requiresOnboarding = Boolean(data.requiresOnboarding);
 
         setStoredAuth(user, token);
       }
@@ -153,6 +156,13 @@ const ChangePassword = () => {
       // Redirect after successful change
       setTimeout(() => {
         const user = getStoredUser();
+
+        // Profile onboarding comes before the dashboard for a newly created
+        // supervisor account.
+        if (user?.requiresOnboarding) {
+          navigate("/onboarding");
+          return;
+        }
 
         switch (user?.role) {
           case "student":

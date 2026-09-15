@@ -387,7 +387,12 @@
   font-family: inherit;
 }
 .ww-editor > * + * { margin-top: 0.6em; }
-.ww-editor p { margin: 0; }
+/* Word separates paragraphs by spacing, not by blank lines. With margin: 0 an
+   imported report (and any typed text) arrived as one undifferentiated wall of
+   paragraphs, which is the main reason an imported document looked unlike the
+   file it came from. */
+.ww-editor p { margin: 0 0 0.55em; }
+.ww-editor p:last-child { margin-bottom: 0; }
 .ww-editor h1 { font-size: 26px; font-weight: 700; margin: 0.8em 0 0.4em; }
 .ww-editor h2 { font-size: 22px; font-weight: 600; margin: 0.7em 0 0.35em; }
 .ww-editor h3 { font-size: 18px; font-weight: 600; margin: 0.6em 0 0.3em; }
@@ -414,11 +419,15 @@
   background: #f7f7f7;
   font-weight: 600;
 }
+/* Figures. `inline-block` rather than `block` so a picture sits where Word put
+   it and a centred figure (the usual case) is centred by its paragraph's
+   text-align instead of being forced to the left. */
 .ww-editor img {
   max-width: 100%;
   height: auto;
-  display: block;
-  margin: 0.6em 0;
+  display: inline-block;
+  vertical-align: bottom;
+  margin: 0.4em 0;
 }
 .ww-editor a {
   color: #185abd;
@@ -443,19 +452,41 @@
   height: 0;
 }
 
-/* Page break */
+/* Page break.
+   Compact by default: this is what an imported Word document produces, and a
+   report with a break on most pages must not turn into a stack of empty grey
+   pages. The explicit "Blank Page" command asks for the full-page look. */
 .ww-editor [data-page-break] {
-  min-height: 1123px;
-  border-top: 1px dashed #c3ccce;
-  border-bottom: 1px dashed #c3ccce;
-  background: #fafafa;
-  color: #7d8b90;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 1.1em 0;
+  color: #8a979b;
   font-family: 'Segoe UI', sans-serif;
   font-size: 10px;
   letter-spacing: .12em;
-  text-align: center;
   text-transform: uppercase;
+  user-select: none;
+}
+.ww-editor [data-page-break]::before,
+.ww-editor [data-page-break]::after {
+  content: '';
+  flex: 1;
+  border-top: 1px dashed #c3ccce;
+}
+.ww-editor [data-page-break].is-blank {
+  display: block;
+  min-height: 1123px;
+  margin: 0;
   padding: 18px;
+  border-top: 1px dashed #c3ccce;
+  border-bottom: 1px dashed #c3ccce;
+  background: #fafafa;
+  text-align: center;
+}
+.ww-editor [data-page-break].is-blank::before,
+.ww-editor [data-page-break].is-blank::after {
+  content: none;
 }
 
 /* Ruler */

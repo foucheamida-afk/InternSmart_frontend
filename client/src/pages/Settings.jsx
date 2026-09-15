@@ -14,13 +14,17 @@ import {
   Phone,
   MapPin,
   Calendar,
+  Building2,
 } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
 import ThemeToggle from '../components/ThemeToggle'
+import { useAuth } from '../context/AuthContext'
+import { getStoredToken, clearStoredAuth } from '../utils/storage'
 import '../assets/css/dashboard.css'
 
 const Settings = () => {
   const navigate = useNavigate()
+  const { logout } = useAuth()
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -29,10 +33,22 @@ const Settings = () => {
   const [expandedSection, setExpandedSection] = useState('profile')
   const [showProfileOverview, setShowProfileOverview] = useState(false)
 
+  // The student - not the admin - introduces their professional supervisor, once
+  // they have found an internship. The academic supervisor is assigned by the
+  // administrator and is shown here read-only.
+  const [internshipForm, setInternshipForm] = useState({
+    company: '',
+    professionalSupervisorName: '',
+    professionalSupervisorEmail: '',
+  })
+  const [savingInternship, setSavingInternship] = useState(false)
+  const [internshipMessage, setInternshipMessage] = useState('')
+  const [internshipError, setInternshipError] = useState('')
+
   useEffect(() => {
     const fetchStudentProfile = async () => {
       try {
-        const token = localStorage.getItem('token')
+        const token = getStoredToken()
 
         if (!token) {
           navigate('/login')
@@ -53,8 +69,7 @@ const Settings = () => {
           console.error('STUDENT PROFILE ERROR:', data)
 
           if (response.status === 401) {
-            localStorage.removeItem('token')
-            localStorage.removeItem('user')
+            clearStoredAuth()
             navigate('/login')
             return
           }
@@ -75,14 +90,73 @@ const Settings = () => {
     fetchStudentProfile()
   }, [navigate])
 
-  const toggleSection = (section) => {
-    setExpandedSection(expandedSection === section ? null : section)
+  // Seed the editable company field once the profile has loaded, without
+  // overwriting whatever the student is currently typing.
+  useEffect(() => {
+    if (user?.internship) {
+      setInternshipForm((prev) => ({ ...prev, company: user.internship.company || '' }))
+    }
+  }, [user])
+
+  const handleSaveInternship = async (event) => {
+    event.preventDefault()
+    setSavingInternship(true)
+    setInternshipMessage('')
+    setInternshipError('')
+
+    try {
+      const token = getStoredToken()
+
+      const response = await fetch('http://localhost:3000/api/students/me/internship', {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(internshipForm),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        setInternshipError(data.message || 'Unable to save your internship details')
+        return
+      }
+
+      setInternshipMessage(data.message)
+
+      // Reload so the newly linked supervisor and company are reflected in the
+      // card and the profile overview. The email/name boxes are cleared because
+      // the supervisor is now linked - re-submitting them is not an action the
+      // student needs to repeat.
+      const refreshed = await fetch('http://localhost:3000/api/students/me', {
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      })
+
+      if (refreshed.ok) {
+        setUser(await refreshed.json())
+      }
+
+      setInternshipForm((prev) => ({
+        ...prev,
+        professionalSupervisorName: '',
+        professionalSupervisorEmail: '',
+      }))
+    } catch (error) {
+      console.error('SAVE INTERNSHIP ERROR:', error)
+      setInternshipError('Unable to connect to the server.')
+    } finally {
+      setSavingInternship(false)
+    }
   }
 
   const handleSignOut = () => {
-    localStorage.removeItem('user')
-    localStorage.removeItem('token')
+    logout()
     navigate('/login')
+  }
+
+  const toggleSection = (section) => {
+    setExpandedSection(expandedSection === section ? null : section)
   }
 
   if (loading) {
@@ -187,6 +261,125 @@ const Settings = () => {
           </section>
 
           <div className="space-y-6">
+            {/* My Internship - the student introduces their professional supervisor here */}
+            <div className="card">
+              <button
+                onClick={() => toggleSection('internship')}
+                className="w-full flex items-center justify-between p-6 cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#F5A623]/20 flex items-center justify-center">
+                    <Building2 className="h-5 w-5 text-[#F5A623]" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="text-base font-semibold" style={{ color: 'var(--text)' }}>My Internship</h3>
+                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      {user.internship?.professionalSupervisor
+                        ? 'Your company and professional supervisor'
+                        : 'Add your company and professional supervisor'}
+                    </p>
+                  </div>
+                </div>
+                {expandedSection === 'internship' ? <ChevronUp className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
+              </button>
+
+              {expandedSection === 'internship' && (
+                <div className="px-6 pb-6 pt-0 border-t border-white/10">
+                  <div className="space-y-5 mt-4">
+                    <div>
+                      <label className="text-xs block mb-1" style={{ color: 'var(--text-muted)' }}>
+                        Academic Supervisor (assigned by your administrator)
+                      </label>
+                      <div className="text-sm" style={{ color: 'var(--text-soft)' }}>
+                        {user.internship?.academicSupervisor
+                          ? `${user.internship.academicSupervisor.name} — ${user.internship.academicSupervisor.email}`
+                          : 'Not assigned yet'}
+                      </div>
+                    </div>
+
+                    {user.internship?.professionalSupervisor && (
+                      <div>
+                        <label className="text-xs block mb-1" style={{ color: 'var(--text-muted)' }}>
+                          Professional Supervisor
+                        </label>
+                        <div className="text-sm" style={{ color: 'var(--text-soft)' }}>
+                          {user.internship.professionalSupervisor.name} — {user.internship.professionalSupervisor.email}
+                        </div>
+                      </div>
+                    )}
+
+                    <form onSubmit={handleSaveInternship} className="space-y-4 pt-1">
+                      <div>
+                        <label className="text-xs block mb-1" style={{ color: 'var(--text-muted)' }}>
+                          Company
+                        </label>
+                        <input
+                          type="text"
+                          value={internshipForm.company}
+                          onChange={(e) => setInternshipForm((prev) => ({ ...prev, company: e.target.value }))}
+                          placeholder="e.g. Acme Corporation"
+                          className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+                          style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-xs block mb-1" style={{ color: 'var(--text-muted)' }}>
+                            Professional Supervisor Name
+                          </label>
+                          <input
+                            type="text"
+                            value={internshipForm.professionalSupervisorName}
+                            onChange={(e) => setInternshipForm((prev) => ({ ...prev, professionalSupervisorName: e.target.value }))}
+                            placeholder="e.g. Jane Doe"
+                            className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+                            style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs block mb-1" style={{ color: 'var(--text-muted)' }}>
+                            Professional Supervisor Email *
+                          </label>
+                          <input
+                            type="email"
+                            required
+                            value={internshipForm.professionalSupervisorEmail}
+                            onChange={(e) => setInternshipForm((prev) => ({ ...prev, professionalSupervisorEmail: e.target.value }))}
+                            placeholder="supervisor@company.com"
+                            className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+                            style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                          />
+                        </div>
+                      </div>
+
+                      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                        If your supervisor does not have an InternSmart account yet, one is created
+                        automatically and the login details are emailed to them. If they already have
+                        one, they are simply linked and notified.
+                      </p>
+
+                      {internshipError && (
+                        <p className="text-xs" style={{ color: '#ef4444' }}>{internshipError}</p>
+                      )}
+
+                      {internshipMessage && (
+                        <p className="text-xs" style={{ color: '#10b981' }}>{internshipMessage}</p>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={savingInternship}
+                        className="w-full rounded-xl bg-[#ee9403] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#d68302] disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {savingInternship ? 'Saving...' : 'Save Internship Details'}
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Profile Settings */}
             <div className="card">
               <button
