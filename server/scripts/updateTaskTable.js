@@ -8,6 +8,7 @@ const updateTaskTable = async () => {
     const columns = await queryInterface.describeTable("Tasks");
 
     const missingColumns = {
+      workUrl: { type: DataTypes.STRING, allowNull: true },
       feedbackAcademic: { type: DataTypes.TEXT, allowNull: true },
       feedbackAcademicAt: { type: DataTypes.DATE, allowNull: true },
       feedbackAcademicBy: { type: DataTypes.INTEGER, allowNull: true },

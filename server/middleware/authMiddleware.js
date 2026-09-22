@@ -26,14 +26,23 @@ const protect = async (req, res, next) => {
       });
     }
 
-    const user = await User.findByPk(decoded.id, { attributes: ["id", "active", "role"] });
+    // `onboardingCompletedAt` rides along on the query that was already being
+    // made, so the role guard can decide whether to gate a supervisor without a
+    // second read.
+    const user = await User.findByPk(decoded.id, {
+      attributes: ["id", "active", "role", "onboardingCompletedAt"],
+    });
     if (!user || user.active === false) {
       return res.status(403).json({
         message: "This account has been deactivated. Please contact your administrator.",
       });
     }
 
-    req.user = { ...decoded, role: user.role };
+    req.user = {
+      ...decoded,
+      role: user.role,
+      onboardingCompletedAt: user.onboardingCompletedAt,
+    };
 
     next();
 

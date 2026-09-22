@@ -86,6 +86,37 @@ const User = sequelize.define("User", {
     allowNull: false,
     defaultValue: 0,
   },
+
+  // Supervisor onboarding profile.
+  //
+  // An account created on demand for a supervisor is handed temporary
+  // credentials; on first login the holder is walked through a password change
+  // and then confirms these details. `onboardingCompletedAt` is null until that
+  // confirmation, which is what gates the supervisor surfaces.
+  //
+  // Accounts that already existed when this feature landed are backfilled at
+  // migration time, so only genuinely new accounts are gated — an established
+  // supervisor is never pushed back through onboarding. See
+  // `ensureUserOnboardingColumns` in server.js.
+  phone: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+
+  organisation: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+
+  jobTitle: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+
+  onboardingCompletedAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
 });
 
 export default User;

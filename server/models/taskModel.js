@@ -28,7 +28,7 @@ const Task = sequelize.define("Task", {
     allowNull: true,
   },
   status: {
-    type: DataTypes.ENUM("pending", "in_progress", "completed"),
+    type: DataTypes.STRING,
     allowNull: false,
     defaultValue: "pending",
   },
@@ -48,6 +48,10 @@ const Task = sequelize.define("Task", {
   },
   submissionNote: {
     type: DataTypes.TEXT,
+    allowNull: true,
+  },
+  workUrl: {
+    type: DataTypes.STRING,
     allowNull: true,
   },
   feedback: {

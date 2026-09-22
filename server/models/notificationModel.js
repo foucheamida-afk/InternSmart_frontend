@@ -29,6 +29,10 @@ const Notification = sequelize.define("Notification", {
     allowNull: false,
     defaultValue: false,
   },
+  meetingLink: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
 });
 
 export default Notification;

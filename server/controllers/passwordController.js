@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import User from "../models/userModel.js";
 import { sendPasswordResetEmail } from "../utils/sendEmail.js";
+import { requiresOnboarding } from "../utils/onboarding.js";
 
 // Password reset policy
 const OTP_TTL_MINUTES = 15;
@@ -304,8 +305,12 @@ const changePassword = async (req, res) => {
       mustChangePassword: false,
     });
 
+    // Changing the password clears the first gate but not necessarily the
+    // second: a freshly provisioned supervisor still has to confirm their
+    // profile, and the client needs to know that to route correctly.
     return res.status(200).json({
       message: "Password changed successfully",
+      requiresOnboarding: requiresOnboarding(user),
     });
 
   } catch (error) {

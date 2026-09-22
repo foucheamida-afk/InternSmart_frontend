@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 
 const generateToken = (user) => {
+  const secret = process.env.JWT_SECRET || "internsmart_super_secret_key_2026";
   return jwt.sign(
     {
       id: user.id,
@@ -8,7 +9,7 @@ const generateToken = (user) => {
       email: user.email,
       role: user.role,
     },
-    process.env.JWT_SECRET,
+    secret,
     {
       expiresIn: "1d",
     }

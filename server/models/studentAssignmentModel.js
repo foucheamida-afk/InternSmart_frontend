@@ -28,6 +28,30 @@ const Internship = sequelize.define("Internship", {
     allowNull: true,
   },
 
+  // Which academic year this internship belongs to, e.g. "2025/2026".
+  //
+  // Added so an archived report can be attributed to a cohort. Cross-year
+  // comparison is the whole point of the plagiarism module: without this, a
+  // similarity match cannot tell "same topic, two years apart" from "same
+  // cohort, same assignment". Nullable, and derived from the submission date
+  // when unset, so existing rows keep working.
+  academicYear: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+
+  // Which programme the internship counts towards, and the host company's
+  // domain. Both are library search facets, snapshotted onto the archive entry.
+  program: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+
+  internshipDomain: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+
   finalGrade: {
     type: DataTypes.FLOAT,
     allowNull: true,

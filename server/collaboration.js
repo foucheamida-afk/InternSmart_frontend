@@ -27,14 +27,37 @@ import "./models/association.js";
  *
  * Persistence keeps the whole Yjs state in DocumentStates, so concurrent editors
  * merge through CRDT rather than overwriting each other's full-document snapshots.
+ *
+ * PDF reports share this server but not that persistence. A PDF is a file: only
+ * its name and location are stored, its editable structure is derived from the
+ * file, and every save rewrites the file itself. So `report-pdf-<id>` documents
+ * keep their CRDT state in memory only (see the Database extension), and the
+ * client seeds that state from the extracted structure when a session starts.
  */
 
 const PORT = Number(process.env.COLLAB_PORT) || 1234;
 
+/**
+ * Document names.
+ *
+ *   report-<id>            the Word report, whose CRDT state IS the document and
+ *                          is therefore persisted in DocumentStates.
+ *   report-pdf-<id>-v<n>   the PDF report. Its content lives in the file on disk,
+ *                          so nothing about it may be written to the database -
+ *                          the CRDT state is kept in memory for as long as the
+ *                          session lives and is rebuilt from the file on the next
+ *                          session. The `v<n>` suffix is the layout version of
+ *                          the extracted structure: bumping it retires sessions
+ *                          seeded by an older build rather than letting them keep
+ *                          a structure the current one no longer produces.
+ */
 export const documentNameFor = (reportId) => `report-${reportId}`;
+export const pdfDocumentNameFor = (reportId, layoutVersion = 1) => `report-pdf-${reportId}-v${layoutVersion}`;
+
+const isPdfDocumentName = (documentName) => /^report-pdf-\d+(-v\d+)?$/.test(String(documentName || ""));
 
 const reportIdFromDocumentName = (documentName) => {
-  const match = /^report-(\d+)$/.exec(String(documentName || ""));
+  const match = /^report-(?:pdf-)?(\d+)(?:-v\d+)?$/.exec(String(documentName || ""));
   return match ? Number(match[1]) : null;
 };
 
@@ -95,6 +118,9 @@ const server = new Server({
     return {
       user: { id: decoded.id, name: decoded.name, role: decoded.role },
       reportId,
+      // Which report workspace this socket belongs to. It decides persistence:
+      // see the Database extension below.
+      pdfDocument: isPdfDocumentName(documentName),
       readOnly: !access.canWrite,
     };
   },
@@ -145,11 +171,22 @@ const server = new Server({
   extensions: [
     new Database({
       fetch: async ({ documentName }) => {
+        // A PDF's content is the file on disk, not a CRDT snapshot. Returning
+        // "nothing stored" is what makes a PDF session start from the file (the
+        // client seeds the structure it read from /api/workspace/reports/:id/pdf)
+        // instead of from a database row that would become a second, drifting
+        // copy of the document.
+        if (isPdfDocumentName(documentName)) return null;
+
         const row = await DocumentState.findOne({ where: { documentName } });
         if (!row || !row.state) return null;
         return new Uint8Array(row.state);
       },
       store: async ({ documentName, state }) => {
+        // Deliberately a no-op for PDFs: only the report's name and file location
+        // are ever stored for a PDF report.
+        if (isPdfDocumentName(documentName)) return;
+
         await DocumentState.upsert({ documentName, state: Buffer.from(state) });
       },
     }),

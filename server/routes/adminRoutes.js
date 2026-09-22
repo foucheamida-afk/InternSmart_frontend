@@ -55,17 +55,50 @@ const storage = multer.diskStorage({
   },
 });
 
+// CSV MIME types actually sent by browsers and spreadsheet exporters. The MIME
+// type is required *as well as* the extension: previously either one alone was
+// enough (`mimetype === "text/csv" || name.endsWith(".csv")`), so any file at all
+// could be uploaded simply by naming it `something.csv`.
+const CSV_MIME_TYPES = [
+  "text/csv",
+  "application/csv",
+  "text/plain",
+  "application/vnd.ms-excel",
+];
+
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === "text/csv" || file.originalname.endsWith(".csv")) {
+    const hasCsvExtension = path.extname(file.originalname).toLowerCase() === ".csv";
+    const hasCsvMime = CSV_MIME_TYPES.includes(String(file.mimetype).toLowerCase());
+
+    if (hasCsvExtension && hasCsvMime) {
       cb(null, true);
     } else {
-      cb(new Error("Only CSV files are allowed"));
+      cb(new Error("Only CSV files are allowed. Upload a .csv export."));
     }
   },
   limits: { fileSize: 10 * 1024 * 1024 },
 });
+
+// Multer's errors were previously passed straight to Express, so a rejected CSV
+// came back as an opaque 500 rather than a message the administrator could act
+// on. Translated here, the same way the student report upload is.
+const uploadCsv = (req, res, next) =>
+  upload.single("csv")(req, res, (error) => {
+    if (!error) return next();
+
+    if (error instanceof multer.MulterError) {
+      if (error.code === "LIMIT_FILE_SIZE") {
+        return res.status(413).json({
+          message: `File is too large. The maximum size is ${10} MB.`,
+        });
+      }
+      return res.status(400).json({ message: error.message });
+    }
+
+    return res.status(415).json({ message: error.message || "Invalid CSV upload." });
+  });
 
 // Dashboard stats
 router.get("/dashboard", protect, authorize("admin"), getDashboardStats);
@@ -110,7 +143,7 @@ router.post("/defense-alerts", protect, authorize("admin"), createDefenseAlert);
 router.put("/defense-alerts/:id", protect, authorize("admin"), updateDefenseAlert);
 
 // CSV Import
-router.post("/import/csv", protect, authorize("admin"), upload.single("csv"), importCSV);
+router.post("/import/csv", protect, authorize("admin"), uploadCsv, importCSV);
 
 // Internship Timeline (supports multiple, non-overwriting records)
 router.get("/timeline", protect, authorize("admin"), listTimelines);

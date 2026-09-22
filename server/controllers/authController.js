@@ -1,6 +1,8 @@
 import User from "../models/userModel.js";
 import bcrypt from "bcrypt";
 import generateToken from "../utils/generateJWT.js";
+import { getEffectiveRoles } from "../utils/effectiveRoles.js";
+import { requiresOnboarding } from "../utils/onboarding.js";
 
 const login = async (req, res) => {
   try {
@@ -14,7 +16,7 @@ const login = async (req, res) => {
     }
 
     // 2. Clean email
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanEmail = String(email).trim().toLowerCase();
 
     // 3. Find user
     const user = await User.findOne({
@@ -37,6 +39,12 @@ const login = async (req, res) => {
     }
 
     // 5. Compare password with bcrypt hash
+    if (!user.password) {
+      return res.status(401).json({
+        message: "Invalid email or password",
+      });
+    }
+
     const passwordMatch = await bcrypt.compare(
       password,
       user.password
@@ -52,13 +60,31 @@ const login = async (req, res) => {
     // 7. Generate JWT
     const token = generateToken(user);
 
-    // 8. Update user status
-    await user.update({
-      status: "logged_in",
-      lastLoginAt: new Date(),
-    });
+    // 8. Update user status safely
+    try {
+      await user.update({
+        status: "logged_in",
+        lastLoginAt: new Date(),
+      });
+    } catch (statusErr) {
+      console.error("Non-fatal error updating user status on login:", statusErr.message);
+    }
 
     // 9. Successful login
+    let roles = [user.role];
+    try {
+      roles = await getEffectiveRoles(user);
+    } catch (rolesErr) {
+      console.error("Non-fatal error fetching effective roles:", rolesErr.message);
+    }
+
+    let onboardingPending = false;
+    try {
+      onboardingPending = requiresOnboarding(user);
+    } catch (onboardingErr) {
+      console.error("Non-fatal error checking onboarding status:", onboardingErr.message);
+    }
+
     return res.status(200).json({
       message: "Login successful",
 
@@ -68,11 +94,17 @@ const login = async (req, res) => {
         user.mustChangePassword
       ),
 
+      requiresOnboarding: onboardingPending,
+
+      roles,
+
       user: {
         id: user.id,
         name: user.name,
         email: user.email,
         role: user.role,
+        roles,
+        requiresOnboarding: onboardingPending,
         status: "logged_in",
         lastLoginAt: user.lastLoginAt,
       },
@@ -82,7 +114,7 @@ const login = async (req, res) => {
     console.error("LOGIN ERROR:", error);
 
     return res.status(500).json({
-      message: "Server error during login",
+      message: error.message || "Server error during login",
       error: error.message,
     });
   }

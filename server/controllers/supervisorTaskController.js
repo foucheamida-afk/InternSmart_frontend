@@ -3,6 +3,7 @@ import Task from "../models/taskModel.js";
 import Student from "../models/studentModel.js";
 import User from "../models/userModel.js";
 import Internship from "../models/studentAssignmentModel.js";
+import Notification from "../models/notificationModel.js";
 
 // GET /api/supervisor/tasks
 export const getSupervisorTasks = async (req, res) => {
@@ -124,6 +125,16 @@ export const createTask = async (req, res) => {
       ],
     });
 
+    // Notify Student
+    if (student.userId) {
+      await Notification.create({
+        userId: student.userId,
+        title: "New Task Assigned",
+        message: `Your supervisor assigned a new task: "${title}".`,
+        type: "info",
+      }).catch((err) => console.error("Notification error:", err));
+    }
+
     return res.status(201).json({
       message: "Task created successfully",
       task: createdTask,
@@ -142,7 +153,7 @@ export const updateTask = async (req, res) => {
   try {
     const supervisorId = req.user.id;
     const { id } = req.params;
-    const { title, description, dueDate, status, progress } = req.body;
+    const { title, description, dueDate, status, progress, feedback } = req.body;
 
     const task = await Task.findOne({
       where: { id, supervisorId },
@@ -169,30 +180,52 @@ export const updateTask = async (req, res) => {
     if (title !== undefined) updateData.title = title;
     if (description !== undefined) updateData.description = description;
     if (dueDate !== undefined) updateData.dueDate = dueDate;
+    if (feedback !== undefined) {
+      updateData.feedback = feedback;
+      updateData.feedbackAcademic = feedback;
+      updateData.feedbackAcademicAt = new Date();
+      updateData.feedbackAcademicBy = supervisorId;
+    }
     if (status !== undefined) {
       updateData.status = status;
       if (status === "completed") {
         updateData.completed = true;
         updateData.progress = 100;
+      } else if (status === "needs_revision") {
+        updateData.completed = false;
       } else {
         updateData.completed = false;
       }
     }
     if (progress !== undefined) {
       updateData.progress = Math.min(100, Math.max(0, parseInt(progress)));
-      if (updateData.progress === 100) {
+      if (updateData.progress === 100 && status === undefined) {
         updateData.status = "completed";
         updateData.completed = true;
-      } else if (updateData.progress > 0) {
-        updateData.status = "in_progress";
-        updateData.completed = false;
-      } else {
-        updateData.status = "pending";
-        updateData.completed = false;
       }
     }
 
     await task.update(updateData);
+
+    // Notify student on review / status update
+    if (task.student?.user?.id && status) {
+      const studentUserId = task.student.user.id;
+      if (status === "completed") {
+        await Notification.create({
+          userId: studentUserId,
+          title: "Task Approved!",
+          message: `Your supervisor approved your submission for task "${task.title}".`,
+          type: "success",
+        }).catch((err) => console.error("Notification error:", err));
+      } else if (status === "needs_revision") {
+        await Notification.create({
+          userId: studentUserId,
+          title: "Task Revision Requested",
+          message: `Your supervisor reviewed task "${task.title}" and requested changes. Please check feedback and resubmit.`,
+          type: "warning",
+        }).catch((err) => console.error("Notification error:", err));
+      }
+    }
 
     return res.status(200).json({
       message: "Task updated successfully",

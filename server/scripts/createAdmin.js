@@ -11,13 +11,18 @@ const createAdmin = async () => {
     const password = "dady12345";
     const name = "System Administrator";
 
+    const hashedPassword = await bcrypt.hash(password, 10);
+
     const existing = await User.findOne({ where: { email } });
     if (existing) {
-      console.log("Admin user already exists:", email);
+      await existing.update({
+        password: hashedPassword,
+        active: true,
+        mustChangePassword: false,
+      });
+      console.log("Admin user password reset successfully:", email);
       process.exit(0);
     }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
 
     const admin = await User.create({
       name,

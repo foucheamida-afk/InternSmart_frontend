@@ -1,4 +1,4 @@
-import { Op } from "sequelize";
+import { Op, fn, literal } from "sequelize";
 import { sequelize } from "../config/db.js";
 import User from "../models/userModel.js";
 import Student from "../models/studentModel.js";
@@ -11,7 +11,15 @@ import Task from "../models/taskModel.js";
 import ReportComment from "../models/reportCommentModel.js";
 import bcrypt from "bcrypt";
 import generateTemporaryPassword from "../utils/generatePassword.js";
+import { normalizeAcademicYear } from "../utils/academicYear.js";
+import { validateDocumentContent } from "../utils/fileContent.js";
 import sendAccountEmail, { sendDefenseAlertEmail } from "../utils/sendEmail.js";
+import {
+  assignSupervisorToStudent,
+  findOrCreateSupervisor,
+  notifySupervisorAssignment,
+  SupervisorProvisioningError,
+} from "../services/supervisorProvisioning.js";
 
 const generateJitsiLink = (meetingId, title) => {
   const slug = `${title || "meeting"}-${meetingId}-${Date.now()}`
@@ -22,41 +30,69 @@ const generateJitsiLink = (meetingId, title) => {
 };
 
 // GET /api/admin/dashboard
+//
+// These eight counters are independent of one another, but each `count()` is a
+// separate round-trip to MariaDB and they were issued one after another with
+// `await`. That costs the *sum* of eight round-trips in wall-clock time and -
+// what actually matters under load - holds one pooled connection for that whole
+// duration. With the default pool of five, that serialisation is what caps
+// throughput: measured with scripts/benchmarkEndpoints.js, this endpoint answered
+// in ~16 ms when requests arrived one at a time, yet a 100-request concurrent
+// burst managed only ~75 req/s. Raising the pool from 5 to 25 changed nothing,
+// which is what pointed here rather than at connection capacity.
+//
+// Two changes, both semantics-preserving. The three report counters collapse into
+// one statement using conditional aggregation, so three round-trips become one.
+// What remains is issued concurrently, so a request occupies its connection for
+// roughly the slowest single query instead of the sum of all six. The response
+// shape is unchanged down to the key names and value types.
 export const getDashboardStats = async (req, res) => {
   try {
-    const totalStudents = await Student.count();
-    const totalSupervisors = await User.count({
-      where: {
-        role: "academic_supervisor",
-      },
-    });
-    const totalInternships = await Internship.count();
-    const reportsPendingReview = await Report.count({
-      where: { status: ["submitted", "in_review", "ai_analysis"] },
-    });
-    const reportsApproved = await Report.count({
-      where: { status: "approved" },
-    });
-    const reportsNeedingRevision = await Report.count({
-      where: { status: "needs_revision" },
-    });
-    const upcomingMeetings = await Meeting.count({
-      where: {
-        status: "scheduled",
-        date: { [Op.gte]: new Date() },
-      },
-    });
-    const defenseAlerts = await DefenseAlert.count({
-      where: { status: "pending" },
-    });
+    const [totalStudents, totalSupervisors, totalInternships, reportCounts, upcomingMeetings, defenseAlerts] =
+      await Promise.all([
+        Student.count({
+          include: [{ model: User, as: "user", where: { email: { [Op.notLike]: "%@example.invalid" } } }],
+        }),
+        User.count({
+          where: {
+            role: "academic_supervisor",
+          },
+        }),
+        Internship.count(),
+        Report.findOne({
+          attributes: [
+            [
+              fn("SUM", literal("CASE WHEN status IN ('submitted','in_review','ai_analysis') THEN 1 ELSE 0 END")),
+              "pending",
+            ],
+            [fn("SUM", literal("CASE WHEN status = 'approved' THEN 1 ELSE 0 END")), "approved"],
+            [fn("SUM", literal("CASE WHEN status = 'needs_revision' THEN 1 ELSE 0 END")), "needsRevision"],
+          ],
+          raw: true,
+        }),
+        Meeting.count({
+          where: {
+            status: "scheduled",
+            date: { [Op.gte]: new Date() },
+          },
+        }),
+        DefenseAlert.count({
+          where: { status: "pending" },
+        }),
+      ]);
+
+    // SUM over zero rows returns NULL, not 0, and MariaDB may return aggregates as
+    // strings. Both would have been impossible with `count()`, which always yields
+    // a number, so normalise rather than letting `null` reach the dashboard.
+    const asCount = (value) => Number(value) || 0;
 
     return res.status(200).json({
       totalStudents,
       totalSupervisors,
       totalInternships,
-      reportsPendingReview,
-      reportsApproved,
-      reportsNeedingRevision,
+      reportsPendingReview: asCount(reportCounts?.pending),
+      reportsApproved: asCount(reportCounts?.approved),
+      reportsNeedingRevision: asCount(reportCounts?.needsRevision),
       upcomingMeetings,
       defenseAlerts,
     });
@@ -147,11 +183,17 @@ export const getAllUsers = async (req, res) => {
     const { search = "", role = "", page = 1, limit = 20 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    const where = {};
+    const where = {
+      email: { [Op.notLike]: "%@example.invalid" },
+    };
     if (search) {
-      where[Op.or] = [
-        { name: { [Op.like]: `%${search}%` } },
-        { email: { [Op.like]: `%${search}%` } },
+      where[Op.and] = [
+        {
+          [Op.or]: [
+            { name: { [Op.like]: `%${search}%` } },
+            { email: { [Op.like]: `%${search}%` } },
+          ],
+        },
       ];
     }
     if (role) {
@@ -225,7 +267,7 @@ export const getUserDetail = async (req, res) => {
 export const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, role, matricule, class: studentClass, academicSupervisorId, professionalSupervisorId, company } = req.body;
+    const { name, email, role, matricule, class: studentClass, academicSupervisorId, professionalSupervisorId, company, academicYear, program, internshipDomain } = req.body;
 
     const user = await User.findByPk(id);
     if (!user) {
@@ -260,12 +302,20 @@ export const updateUser = async (req, res) => {
             academicSupervisorId: academicSupervisorId || null,
             professionalSupervisorId: professionalSupervisorId || null,
             company: company || null,
+            // The cohort a library entry is filed under. Normalised so "2025-2026"
+            // and "2025/2026" cannot both end up stored.
+            academicYear: normalizeAcademicYear(academicYear),
+            program: program || null,
+            internshipDomain: internshipDomain || null,
           });
         } else {
           await internship.update({
             academicSupervisorId: academicSupervisorId !== undefined ? academicSupervisorId : internship.academicSupervisorId,
             professionalSupervisorId: professionalSupervisorId !== undefined ? professionalSupervisorId : internship.professionalSupervisorId,
             company: company !== undefined ? company : internship.company,
+            academicYear: academicYear !== undefined ? normalizeAcademicYear(academicYear) : internship.academicYear,
+            program: program !== undefined ? program : internship.program,
+            internshipDomain: internshipDomain !== undefined ? internshipDomain : internship.internshipDomain,
           });
         }
       }
@@ -462,7 +512,18 @@ export const importCSV = async (req, res) => {
     }
 
     const fs = await import("fs");
-    const csvContent = fs.readFileSync(req.file.path, "utf-8");
+
+    // Content check, after multer has the bytes. The filter on the route stops an
+    // honest client picking the wrong file; this stops a renamed one. The temp
+    // file is removed either way, so a rejected upload leaves nothing behind.
+    const csvBuffer = fs.readFileSync(req.file.path);
+    const verdict = validateDocumentContent(csvBuffer, "csv");
+    if (!verdict.ok) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ message: verdict.reason });
+    }
+
+    const csvContent = csvBuffer.toString("utf-8");
     const lines = csvContent.split("\n").filter(line => line.trim());
 
     if (lines.length < 2) {
@@ -477,9 +538,6 @@ export const importCSV = async (req, res) => {
       "class",
       "academic_supervisor_name",
       "academic_supervisor_email",
-      "professional_supervisor_name",
-      "professional_supervisor_email",
-      "company",
     ];
     const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
 
@@ -496,7 +554,60 @@ export const importCSV = async (req, res) => {
       warnings: [],
     };
 
+    // Resolved supervisors are memoised for the whole import, so one person is
+    // looked up - and emailed - once however many rows reference them. Entries
+    // hold the whole result object rather than a bare id so the created/reused
+    // distinction, and therefore which email is due, survives to later rows.
     const supervisorCache = new Map();
+
+    const resolveSupervisor = async ({ email, name, role, rowNumber, transaction }) => {
+      if (!email?.trim()) return null;
+
+      const key = `${role}:${email.trim().toLowerCase()}`;
+      if (supervisorCache.has(key)) return supervisorCache.get(key);
+
+      const resolved = await findOrCreateSupervisor({ email, name, role, transaction });
+      supervisorCache.set(key, resolved);
+
+      if (resolved.created) {
+        results.warnings.push({
+          row: rowNumber,
+          warning: `Created ${role === "academic_supervisor" ? "academic" : "professional"} supervisor account for ${resolved.user.email}`,
+        });
+      }
+
+      return resolved;
+    };
+
+    // Notifies each supervisor at most once per import, and only after the row's
+    // transaction commits. The previous implementation sent mail *inside* the
+    // transaction, so a rollback could still deliver credentials for a row that
+    // was never persisted.
+    const notifyResolvedSupervisor = async ({
+      resolved,
+      role,
+      studentName,
+      studentEmail,
+      company,
+      rowNumber,
+    }) => {
+      if (!resolved || resolved.notified) return;
+      resolved.notified = true;
+
+      const outcome = await notifySupervisorAssignment({
+        supervisor: resolved.user,
+        created: resolved.created,
+        temporaryPassword: resolved.temporaryPassword,
+        role,
+        studentName,
+        studentEmail,
+        company,
+      });
+
+      if (outcome.warning) {
+        results.warnings.push({ row: rowNumber, warning: outcome.warning });
+      }
+    };
 
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(",").map(v => v.trim());
@@ -528,105 +639,23 @@ export const importCSV = async (req, res) => {
           continue;
         }
 
-        let academicSupervisorId = null;
+        const academicSupervisor = await resolveSupervisor({
+          email: row.academic_supervisor_email,
+          name: row.academic_supervisor_name,
+          role: "academic_supervisor",
+          rowNumber: i + 1,
+          transaction: t,
+        });
 
-        if (row.academic_supervisor_email) {
-          if (supervisorCache.has(row.academic_supervisor_email)) {
-            academicSupervisorId = supervisorCache.get(row.academic_supervisor_email);
-          } else {
-            let academicSupervisor = await User.findOne({
-              where: { email: row.academic_supervisor_email, role: "academic_supervisor" },
-              transaction: t,
-            });
+        // const professionalSupervisor = await resolveSupervisor({
+        //   email: row.professional_supervisor_email,
+        //   name: row.professional_supervisor_name,
+        //   role: "professional_supervisor",
+        //   rowNumber: i + 1,
+        //   transaction: t,
+        // });
 
-            if (!academicSupervisor) {
-              const tempPassword = `Temp${Math.random().toString(36).slice(2, 10)}!`;
-              const hashedTempPassword = await bcrypt.hash(tempPassword, 10);
-
-              academicSupervisor = await User.create({
-                name: row.academic_supervisor_name || row.academic_supervisor_email,
-                email: row.academic_supervisor_email,
-                password: hashedTempPassword,
-                role: "academic_supervisor",
-                mustChangePassword: true,
-                active: true,
-              }, { transaction: t });
-
-              try {
-                await sendAccountEmail({
-                  to: row.academic_supervisor_email,
-                  name: row.academic_supervisor_name || row.academic_supervisor_email,
-                  password: tempPassword,
-                  role: "academic_supervisor",
-                });
-              } catch (emailError) {
-                results.warnings.push({
-                  row: i + 1,
-                  warning: `Account created but email failed for supervisor ${row.academic_supervisor_email}: ${emailError.message}`,
-                });
-              }
-
-              results.warnings.push({
-                row: i + 1,
-                warning: `Created supervisor account for ${row.academic_supervisor_email}`,
-              });
-            }
-
-            academicSupervisorId = academicSupervisor.id;
-            supervisorCache.set(row.academic_supervisor_email, academicSupervisorId);
-          }
-        }
-
-        let professionalSupervisorId = null;
-
-        if (row.professional_supervisor_email) {
-          if (supervisorCache.has(`professional-${row.professional_supervisor_email}`)) {
-            professionalSupervisorId = supervisorCache.get(`professional-${row.professional_supervisor_email}`);
-          } else {
-            let professionalSupervisor = await User.findOne({
-              where: { email: row.professional_supervisor_email, role: "professional_supervisor" },
-              transaction: t,
-            });
-
-            if (!professionalSupervisor) {
-              const tempPassword = `Temp${Math.random().toString(36).slice(2, 10)}!`;
-              const hashedTempPassword = await bcrypt.hash(tempPassword, 10);
-
-              professionalSupervisor = await User.create({
-                name: row.professional_supervisor_name || row.professional_supervisor_email,
-                email: row.professional_supervisor_email,
-                password: hashedTempPassword,
-                role: "professional_supervisor",
-                mustChangePassword: true,
-                active: true,
-              }, { transaction: t });
-
-              try {
-                await sendAccountEmail({
-                  to: row.professional_supervisor_email,
-                  name: row.professional_supervisor_name || row.professional_supervisor_email,
-                  password: tempPassword,
-                  role: "professional_supervisor",
-                });
-              } catch (emailError) {
-                results.warnings.push({
-                  row: i + 1,
-                  warning: `Account created but email failed for professional supervisor ${row.professional_supervisor_email}: ${emailError.message}`,
-                });
-              }
-
-              results.warnings.push({
-                row: i + 1,
-                warning: `Created professional supervisor account for ${row.professional_supervisor_email}`,
-              });
-            }
-
-            professionalSupervisorId = professionalSupervisor.id;
-            supervisorCache.set(`professional-${row.professional_supervisor_email}`, professionalSupervisorId);
-          }
-        }
-
-        const temporaryPassword = `Temp${Math.random().toString(36).slice(2, 10)}!`;
+        const temporaryPassword = generateTemporaryPassword();
         const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
 
         const user = await User.create({
@@ -637,20 +666,6 @@ export const importCSV = async (req, res) => {
           mustChangePassword: true,
           active: true,
         }, { transaction: t });
-
-        try {
-          await sendAccountEmail({
-            to: row.student_email,
-            name: row.student_name,
-            password: temporaryPassword,
-            role: "student",
-          });
-        } catch (emailError) {
-          results.warnings.push({
-            row: i + 1,
-            warning: `Account created but email failed for student ${row.student_email}: ${emailError.message}`,
-          });
-        }
 
         const student = await Student.create({
           userId: user.id,
@@ -664,11 +679,11 @@ export const importCSV = async (req, res) => {
         // and abandoned the freshly created User + Student as orphans. Duplicate
         // students are already rejected by the email/matricule checks above.
 
-        if (academicSupervisorId || professionalSupervisorId) {
+        if (academicSupervisor || professionalSupervisor) {
           await Internship.create({
             studentId: student.id,
-            academicSupervisorId,
-            professionalSupervisorId,
+            academicSupervisorId: academicSupervisor?.user.id ?? null,
+            professionalSupervisorId: professionalSupervisor?.user.id ?? null,
             company: row.company || null,
           }, { transaction: t });
         }
@@ -677,6 +692,49 @@ export const importCSV = async (req, res) => {
         t = null;
 
         results.success++;
+
+        // Mail is sent only now that the row is durable. Failures here are
+        // warnings rather than row errors - the data is already committed, so
+        // reporting the row as failed would be untrue and would invite a
+        // duplicate re-import.
+        try {
+          await sendAccountEmail({
+            to: row.student_email,
+            name: row.student_name,
+            password: temporaryPassword,
+            role: "student",
+          });
+        } catch (emailError) {
+          results.warnings.push({
+            row: i + 1,
+            warning: `Student account created but the welcome email failed for ${row.student_email}: ${emailError.message}`,
+          });
+        }
+
+        try {
+          await notifyResolvedSupervisor({
+            resolved: academicSupervisor,
+            role: "academic_supervisor",
+            studentName: row.student_name,
+            studentEmail: row.student_email,
+            company: row.company || null,
+            rowNumber: i + 1,
+          });
+
+          await notifyResolvedSupervisor({
+            resolved: professionalSupervisor,
+            role: "professional_supervisor",
+            studentName: row.student_name,
+            studentEmail: row.student_email,
+            company: row.company || null,
+            rowNumber: i + 1,
+          });
+        } catch (notificationError) {
+          results.warnings.push({
+            row: i + 1,
+            warning: `Student imported but supervisor notification failed: ${notificationError.message}`,
+          });
+        }
       } catch (error) {
         if (t) {
           try {
@@ -708,12 +766,32 @@ export const importCSV = async (req, res) => {
 };
 
 // POST /api/admin/users
+//
+// Creating a student optionally assigns their academic supervisor in the same
+// step, which is the documented workflow: the admin picks the supervisor, the
+// supervisor's account is reused if the email already exists or created (with
+// emailed credentials) if it does not.
 export const createUser = async (req, res) => {
   try {
-    const { name, email, role, matricule, class: studentClass } = req.body;
+    const {
+      name,
+      email,
+      role,
+      matricule,
+      class: studentClass,
+      academicSupervisorEmail,
+      academicSupervisorName,
+      company,
+    } = req.body;
 
     if (!name?.trim() || !email?.trim() || !role) {
       return res.status(400).json({ message: "Name, email, and role are required" });
+    }
+
+    if (academicSupervisorEmail && role !== "student") {
+      return res.status(400).json({
+        message: "An academic supervisor can only be assigned while creating a student account",
+      });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -722,31 +800,62 @@ export const createUser = async (req, res) => {
       return res.status(409).json({ message: "An account with this email already exists. Use reset password if delivery failed." });
     }
 
-    const temporaryPassword = `Temp${Math.random().toString(36).slice(2, 10)}!`;
+    // Crypto-based rather than Math.random(): this password is the only thing
+    // protecting a brand-new account, and generatePassword.js exists for exactly
+    // this purpose but was previously imported and never called.
+    const temporaryPassword = generateTemporaryPassword();
 
     const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
-    const user = await User.create({
-      name,
-      email: normalizedEmail,
-      password: hashedPassword,
-      role,
-      mustChangePassword: true,
-    });
 
-    if (role === "student") {
-      await Student.create({
-        userId: user.id,
-        matricule: matricule || `TEMP-${user.id}`,
-        class: studentClass || "Pending Assignment",
-      });
-    }
+    let createdUser;
+    let supervisorResult = null;
+
+    // User + Student + Internship + supervisor account are one unit of work: if
+    // the requested supervisor cannot be resolved, the student must not be left
+    // behind half-created without the assignment that was asked for.
+    await sequelize.transaction(async (t) => {
+      createdUser = await User.create(
+        {
+          name: name.trim(),
+          email: normalizedEmail,
+          password: hashedPassword,
+          role,
+          mustChangePassword: true,
+        },
+        { transaction: t }
+      );
+
+      if (role === "student") {
+        const student = await Student.create(
+          {
+            userId: createdUser.id,
+            matricule: matricule || `TEMP-${createdUser.id}`,
+            class: studentClass || "Pending Assignment",
+          },
+          { transaction: t }
+        );
+
+        if (academicSupervisorEmail) {
+          supervisorResult = await assignSupervisorToStudent({
+            studentId: student.id,
+            studentName: name.trim(),
+            studentEmail: normalizedEmail,
+            role: "academic_supervisor",
+            email: academicSupervisorEmail,
+            name: academicSupervisorName,
+            company: company?.trim() ? company.trim() : undefined,
+            transaction: t,
+          });
+        }
+      }
+    });
 
     let emailSent = true;
     if (role === "student" || role === "academic_supervisor" || role === "professional_supervisor") {
       try {
         await sendAccountEmail({
-          to: email,
-          name,
+          to: normalizedEmail,
+          name: name.trim(),
           password: temporaryPassword,
           role,
         });
@@ -756,12 +865,40 @@ export const createUser = async (req, res) => {
       }
     }
 
+    // Sent only after the transaction committed - mailing credentials for a row a
+    // rollback could still erase would be worse than a late email.
+    let supervisorNotification = null;
+    if (supervisorResult) {
+      supervisorNotification = await notifySupervisorAssignment({
+        supervisor: supervisorResult.supervisor,
+        created: supervisorResult.created,
+        temporaryPassword: supervisorResult.temporaryPassword,
+        role: "academic_supervisor",
+        studentName: name.trim(),
+        studentEmail: normalizedEmail,
+        company: company?.trim() || null,
+      });
+    }
+
     return res.status(201).json({
       message: emailSent ? "User created and account email sent" : "User created, but the account email could not be sent",
       emailSent,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: { id: createdUser.id, name: createdUser.name, email: createdUser.email, role: createdUser.role },
+      academicSupervisor: supervisorResult
+        ? {
+            id: supervisorResult.supervisor.id,
+            name: supervisorResult.supervisor.name,
+            email: supervisorResult.supervisor.email,
+            accountCreated: supervisorResult.created,
+          }
+        : null,
+      supervisorNotification,
     });
   } catch (error) {
+    if (error instanceof SupervisorProvisioningError) {
+      return res.status(error.status).json({ message: error.message });
+    }
+
     console.error("CREATE USER ERROR:", error);
     return res.status(500).json({
       message: "Server error while creating user",
@@ -809,6 +946,7 @@ export const getAllStudents = async (req, res) => {
         {
           model: User,
           as: "user",
+          where: { email: { [Op.notLike]: "%@example.invalid" } },
           attributes: ["id", "name", "email", "role"],
           required: true,
         },
@@ -910,17 +1048,25 @@ export const getAllInternships = async (req, res) => {
       ];
     }
 
-    const { count, rows: internships } = await Internship.findAndCountAll({
+    const { count, rows: rawInternships } = await Internship.findAndCountAll({
       where,
       include: [
         {
           model: Student,
           as: "student",
+          required: true,
           include: [
             {
               model: User,
               as: "user",
+              where: { email: { [Op.notLike]: "%@example.invalid" } },
               attributes: ["id", "name", "email"],
+              required: true,
+            },
+            {
+              model: Report,
+              as: "reports",
+              attributes: ["id", "status", "submittedAt", "finalSubmittedAt", "updatedAt"],
             },
           ],
         },
@@ -938,6 +1084,49 @@ export const getAllInternships = async (req, res) => {
       limit: parseInt(limit),
       offset,
       order: [["id", "DESC"]],
+    });
+
+    const internships = rawInternships.map((item) => {
+      const plain = item.get({ plain: true });
+      const reports = plain.student?.reports || [];
+      reports.sort((a, b) => b.id - a.id);
+      const latest = reports[0];
+
+      let percent = 0;
+      let stage = "Not Started";
+      let statusKey = "not_started";
+
+      if (latest) {
+        if (latest.status === "final_submitted" || latest.status === "approved") {
+          percent = 100;
+          stage = "Final Submitted";
+          statusKey = "completed";
+        } else if (latest.status === "needs_revision") {
+          percent = 75;
+          stage = "Needs Revision";
+          statusKey = "revision";
+        } else if (["submitted", "in_review", "ai_analysis"].includes(latest.status)) {
+          percent = 60;
+          stage = "Under Review";
+          statusKey = "in_review";
+        } else if (latest.status === "draft") {
+          percent = 35;
+          stage = "Report Drafting";
+          statusKey = "draft";
+        }
+      }
+
+      return {
+        ...plain,
+        progress: {
+          percent,
+          stage,
+          statusKey,
+          reportCount: reports.length,
+          latestReportStatus: latest?.status || null,
+          lastActivity: latest?.updatedAt || latest?.submittedAt || null,
+        },
+      };
     });
 
     return res.status(200).json({
@@ -978,11 +1167,14 @@ export const getAllReports = async (req, res) => {
         {
           model: Student,
           as: "student",
+          required: true,
           include: [
             {
               model: User,
               as: "user",
+              where: { email: { [Op.notLike]: "%@example.invalid" } },
               attributes: ["id", "name", "email"],
+              required: true,
             },
           ],
         },

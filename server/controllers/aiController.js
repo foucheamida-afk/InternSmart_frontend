@@ -1,4 +1,5 @@
 import { extractTextFromPDF } from "../services/pdfService.js";
+import { extractPlainText } from "../utils/documentExtraction.js";
 import { generateGeminiResponse } from "../services/geminiService.js";
 import { buildReportReviewPrompt, buildWritingAssistantPrompt } from "../prompts/reportReviewPrompt.js";
 import Student from "../models/studentModel.js";
@@ -96,7 +97,8 @@ export async function writingAssistant(req, res) {
       const relativeFile = report.fileUrl.replace(/^\/uploads\//, "");
       const filePath = path.join(process.cwd(), "uploads", relativeFile);
       if (fs.existsSync(filePath)) {
-        reportText = (await extractTextFromPDF(fs.readFileSync(filePath))).text;
+        // Reads PDF or Word (.docx) depending on what the student uploaded.
+        reportText = (await extractPlainText(filePath)).text;
       }
     }
     if (!reportText && report.documentContent) {

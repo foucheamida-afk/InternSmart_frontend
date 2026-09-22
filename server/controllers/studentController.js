@@ -2,18 +2,57 @@ import User from "../models/userModel.js";
 import Student from "../models/studentModel.js";
 import Internship from "../models/studentAssignmentModel.js";
 import Report from "../models/reportModel.js";
+import ReportVersion from "../models/reportVersionModel.js";
+import ReportReview from "../models/reportReviewModel.js";
 import Meeting from "../models/meetingModel.js";
 import Notification from "../models/notificationModel.js";
 import Task from "../models/taskModel.js";
 import { Op } from "sequelize";
-import extractPdfText from "../utils/extractPdfText.js";
+import { extractDocumentContent, extractPlainText, isContentlessDocument } from "../utils/documentExtraction.js";
+import { REPORT_FILE_KIND, reportFileKind } from "../utils/documentTypes.js";
+import { checkStorableDocumentContent, tooLargeMessage } from "../utils/storedContentLimit.js";
 import fs from "fs";
 import path from "path";
-import { extractTextFromPDF } from "../services/pdfService.js";
 import { generateGeminiResponse } from "../services/geminiService.js";
 import { buildReportReviewPrompt } from "../prompts/reportReviewPrompt.js";
 import { computeComposite } from "../utils/gradeCalculator.js";
 import { consumeAiRequest, refundAiRequest } from "../utils/aiQuota.js";
+import hashFile from "../utils/fileHash.js";
+import {
+  assignSupervisorToStudent,
+  notifySupervisorAssignment,
+  SupervisorProvisioningError,
+} from "../services/supervisorProvisioning.js";
+import {
+  openReviewRound,
+  finalSubmitReport as finalSubmitReportWorkflow,
+  getCurrentReviews,
+  getSubmissionReadiness,
+  getInternshipForStudent,
+  ReportWorkflowError,
+} from "../services/reportWorkflow.js";
+
+/**
+ * A report row plus the two fields the client needs to decide what it may do
+ * with the file: `fileType` ("docx" | "pdf" | null) and `editable`.
+ *
+ * Both formats are accepted on upload, but only a Word document can be opened
+ * for editing in the writing workspace - a PDF is view-only. The immutable
+ * version row is authoritative for the format; `Report.fileName` mirrors it for
+ * rows uploaded before versions existed. Deriving this in one place is what
+ * keeps My Reports and the workspace from disagreeing about the same file.
+ */
+const withFileFormat = (report, version = null) => {
+  const fileName = version?.fileName || report.fileName;
+  const fileType = reportFileKind({ fileType: version?.fileType, fileName });
+
+  return {
+    ...report.toJSON(),
+    fileType,
+    editable: fileType === REPORT_FILE_KIND.DOCX,
+    fileSize: version?.fileSize ?? null,
+  };
+};
 
 const getOrCreateStudent = async (userId) => {
   let student = await Student.findOne({ where: { userId } });
@@ -145,6 +184,237 @@ const getMyProfile = async (req, res) => {
   }
 };
 
+// PUT /api/students/me/internship
+//
+// The student - not the admin - introduces their professional supervisor, after
+// they have found an internship. This is the student-driven half of the
+// supervisor onboarding workflow: the email is resolved to an existing account
+// or a new one is created, the student is linked either way, and the supervisor
+// is notified. Credentials are emailed only when an account was actually created.
+const updateMyInternship = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { company, professionalSupervisorEmail, professionalSupervisorName } = req.body || {};
+
+    const student =
+      (await Student.findOne({ where: { userId } })) || (await getOrCreateStudent(userId));
+
+    if (!student) {
+      return res.status(404).json({ message: "Student profile not found" });
+    }
+
+    const supervisorEmail = String(professionalSupervisorEmail || "").trim();
+    if (!supervisorEmail) {
+      return res.status(400).json({
+        message: "Your professional supervisor's email address is required",
+      });
+    }
+
+    const studentUser = await User.findByPk(userId, { attributes: ["name", "email"] });
+
+    // A student cannot be their own professional supervisor: that would let them
+    // reach the supervisor surface, including grading, through their own account.
+    if (
+      studentUser?.email &&
+      studentUser.email.toLowerCase() === supervisorEmail.toLowerCase()
+    ) {
+      return res.status(400).json({
+        message: "You cannot use your own email address as your professional supervisor.",
+      });
+    }
+
+    const trimmedCompany = String(company ?? "").trim();
+    const studentName = studentUser?.name || studentUser?.email;
+
+    const { supervisor, created, temporaryPassword } = await assignSupervisorToStudent({
+      studentId: student.id,
+      studentName,
+      studentEmail: studentUser?.email,
+      role: "professional_supervisor",
+      email: supervisorEmail,
+      name: professionalSupervisorName,
+      // An empty box means "leave the company as it is", not "clear it".
+      company: trimmedCompany ? trimmedCompany : undefined,
+    });
+
+    const notification = await notifySupervisorAssignment({
+      supervisor,
+      created,
+      temporaryPassword,
+      role: "professional_supervisor",
+      studentName,
+      studentEmail: studentUser?.email,
+      company: trimmedCompany || null,
+    });
+
+    return res.status(created ? 201 : 200).json({
+      message: created
+        ? `A professional supervisor account was created for ${supervisor.email} and the login details have been emailed to them.`
+        : `${supervisor.email} already had an InternSmart account and has been linked as your professional supervisor.`,
+      accountCreated: created,
+      notification,
+      professionalSupervisor: {
+        id: supervisor.id,
+        name: supervisor.name,
+        email: supervisor.email,
+      },
+    });
+  } catch (error) {
+    if (error instanceof SupervisorProvisioningError) {
+      return res.status(error.status).json({ message: error.message });
+    }
+
+    console.error("UPDATE MY INTERNSHIP ERROR:", error);
+    return res.status(500).json({
+      message: "Server error while saving your internship details",
+      error: error.message,
+    });
+  }
+};
+
+// POST /api/students/reports/:id/request-submission
+//
+// Stage one of the two-stage submission: opens a review round for the current
+// file, one row per supervisor, and notifies both. The report cannot be
+// finalised until both approve.
+const requestReportSubmission = async (req, res) => {
+  try {
+    const student = await Student.findOne({ where: { userId: req.user.id } });
+    if (!student) return res.status(404).json({ message: "Student profile not found" });
+
+    const report = await Report.findOne({ where: { id: req.params.id, studentId: student.id } });
+    if (!report) return res.status(404).json({ message: "Report not found" });
+
+    const version = report.currentVersionId
+      ? await ReportVersion.findByPk(report.currentVersionId)
+      : null;
+
+    if (!version) {
+      return res.status(400).json({
+        message: "Upload your report before requesting submission.",
+        code: "NO_VERSION",
+      });
+    }
+
+    const result = await openReviewRound(report, version, { actorId: req.user.id });
+
+    return res.status(201).json({
+      message:
+        "Your report has been sent for review. Both supervisors must validate it before final submission.",
+      cycle: result.cycle,
+    });
+  } catch (error) {
+    if (error instanceof ReportWorkflowError) {
+      return res.status(error.status).json({
+        message: error.message,
+        ...(error.code ? { code: error.code } : {}),
+      });
+    }
+    console.error("REQUEST REPORT SUBMISSION ERROR:", error);
+    return res.status(500).json({
+      message: "Unable to request report review",
+      error: error.message,
+    });
+  }
+};
+
+// GET /api/students/reports/:id/submission-status
+//
+// The student sees each supervisor's *state* - pending, approved, rejected and
+// any correction reason - but never a mark or confidential comment. The
+// confidential columns are excluded by the query, not filtered afterwards
+// (integrity rule 9).
+const getReportSubmissionStatus = async (req, res) => {
+  try {
+    const student = await Student.findOne({ where: { userId: req.user.id } });
+    if (!student) return res.status(404).json({ message: "Student profile not found" });
+
+    const report = await Report.findOne({ where: { id: req.params.id, studentId: student.id } });
+    if (!report) return res.status(404).json({ message: "Report not found" });
+
+    const internship = await getInternshipForStudent(student.id);
+    const reviews = await getCurrentReviews(report, { includePrivate: false });
+    const readiness = getSubmissionReadiness(report, internship, reviews);
+
+    const academic = reviews.find((r) => r.supervisorType === "academic");
+    const professional = reviews.find((r) => r.supervisorType === "professional");
+
+    return res.status(200).json({
+      reportId: report.id,
+      title: report.title,
+      status: report.status,
+      cycle: report.reviewCycle || 1,
+      currentVersion: report.currentVersionId
+        ? { id: report.currentVersionId, versionNumber: report.version }
+        : null,
+      reviews: reviews.map((review) => ({
+        supervisorType: review.supervisorType,
+        status: review.status,
+        rejectionReason: review.rejectionReason,
+        reviewedAt: review.reviewedAt,
+      })),
+      academicApproved: academic?.status === "approved",
+      professionalApproved: professional?.status === "approved",
+      readyForFinalSubmission:
+        academic?.status === "approved" && professional?.status === "approved" && !report.lockedAt,
+      canRequestSubmission: readiness.canRequestSubmission,
+      blockingIssues: readiness.issues,
+      submissionRequestedAt: report.submissionRequestedAt,
+      finalSubmittedAt: report.finalSubmittedAt,
+      locked: Boolean(report.lockedAt),
+    });
+  } catch (error) {
+    console.error("GET REPORT SUBMISSION STATUS ERROR:", error);
+    return res.status(500).json({
+      message: "Unable to load the submission status",
+      error: error.message,
+    });
+  }
+};
+
+// POST /api/students/reports/:id/final-submit
+//
+// Stage two: only reachable once both supervisors approved, and the approvals
+// must still describe the exact file being submitted.
+const finalSubmitReport = async (req, res) => {
+  try {
+    const student = await Student.findOne({ where: { userId: req.user.id } });
+    if (!student) return res.status(404).json({ message: "Student profile not found" });
+
+    const report = await Report.findOne({ where: { id: req.params.id, studentId: student.id } });
+    if (!report) return res.status(404).json({ message: "Report not found" });
+
+    const result = await finalSubmitReportWorkflow({
+      report,
+      student,
+      acceptedPlagiarismScore:
+        req.body?.acceptedPlagiarismScore === undefined
+          ? null
+          : req.body.acceptedPlagiarismScore,
+    });
+
+    return res.status(200).json({
+      message:
+        "Your report has been submitted as final and archived. This version can no longer be modified without administrator authorization.",
+      finalSubmittedAt: result.submittedAt,
+      versionNumber: result.version.versionNumber,
+      fileHash: result.version.fileHash,
+    });
+  } catch (error) {
+    if (error instanceof ReportWorkflowError) {
+      return res.status(error.status).json({
+        message: error.message,
+        ...(error.code ? { code: error.code } : {}),
+      });
+    }
+    console.error("FINAL SUBMIT REPORT ERROR:", error);
+    return res.status(500).json({
+      message: "Unable to submit the final report",
+      error: error.message,
+    });
+  }
+};
+
 const getMyReports = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -158,7 +428,25 @@ const getMyReports = async (req, res) => {
       order: [["submittedAt", "DESC"]],
     });
 
-    return res.status(200).json({ reports });
+    // One extra query for the whole list rather than one per report: the format
+    // of the current version is what tells the card whether the file can be
+    // opened for editing.
+    const versionIds = reports
+      .map((report) => report.currentVersionId)
+      .filter((id) => Number.isInteger(id));
+
+    const versions = versionIds.length
+      ? await ReportVersion.findAll({
+          where: { id: versionIds },
+          attributes: ["id", "fileName", "fileType", "fileSize"],
+        })
+      : [];
+
+    const versionsById = new Map(versions.map((version) => [version.id, version]));
+
+    return res.status(200).json({
+      reports: reports.map((report) => withFileFormat(report, versionsById.get(report.currentVersionId))),
+    });
   } catch (error) {
     console.error("GET MY REPORTS ERROR:", error);
     return res.status(500).json({
@@ -178,40 +466,159 @@ const submitReport = async (req, res) => {
     const title = (req.body.title || req.file.originalname.replace(/\.[^/.]+$/, "")).trim();
     const filePath = req.file.path
     let documentContent = null
-    try {
-      documentContent = await extractPdfText(filePath)
-    } catch {
+
+    // A Word file is converted into editor content, because that conversion *is*
+    // the editable document the writing workspace holds.
+    //
+    // A PDF is not converted at all. Its content is the file, and the PDF
+    // workspace reads the structure out of that file whenever a session starts
+    // and writes edits straight back to it - so storing a derived copy in
+    // `documentContent` would only create a second version of the document that
+    // can drift from the one being displayed. Only the name and the location are
+    // kept for a PDF. (The similarity engine reads the file when it needs text;
+    // see services/plagiarism/internalProvider.js.)
+    const uploadKind = reportFileKind({ fileType: req.file.mimetype, fileName: req.file.originalname });
+    const isPdfUpload = uploadKind === REPORT_FILE_KIND.PDF;
+
+    if (!isPdfUpload) {
+      // Dispatches on the file type: a .docx is read with mammoth into editor
+      // content.
+      try {
+        documentContent = await extractDocumentContent(filePath)
+      } catch {
+        documentContent = null
+      }
+    }
+
+    // A conversion that produced nothing is stored as *no content*, never as an
+    // empty document: an empty document is indistinguishable from a finished one,
+    // so it would stop the workspace from ever reading the file again. Leaving the
+    // column empty lets the next load retry, and the upload itself still stands.
+    if (documentContent && isContentlessDocument(documentContent)) {
+      console.warn(
+        `REPORT CONVERSION PRODUCED NO CONTENT: ${req.file.originalname} converted to an empty document. `
+        + "Stored without converted content so the workspace can read the file again.",
+      )
       documentContent = null
     }
 
-    const existing = await Report.findOne({ where: { studentId: student.id } });
-    if (existing) {
-      const updated = await existing.update({
-        title: title || existing.title || "Internship report",
-        fileName: req.file.originalname,
-        fileUrl: `/uploads/${req.file.filename}`,
-        version: (existing.version || 1) + 1,
-        status: "submitted",
-        submittedAt: new Date(),
-        progress: 10,
-        documentContent,
+    // The converted document is stored in one statement, so it is bounded by the
+    // database's max_allowed_packet. Checking *here* matters twice over: the
+    // student gets a reason instead of an opaque 500, and an over-sized write
+    // never reaches the connection - MariaDB answers it by resetting the socket,
+    // which also kills a pooled connection another request may be using.
+    const size = await checkStorableDocumentContent(documentContent);
+    if (size.tooLarge) {
+      // Remove the file the upload middleware already wrote: the report was not
+      // accepted, so leaving it behind would accumulate orphaned uploads.
+      try {
+        fs.unlinkSync(filePath);
+      } catch {
+        // The leftovers are harmless if the file cannot be removed.
+      }
+
+      console.warn(`REPORT TOO LARGE TO STORE: ${req.file.originalname} converted to ${size.bytes} bytes (limit ${size.limit}).`);
+      return res.status(413).json({
+        message: tooLargeMessage(size),
+        code: "REPORT_CONTENT_TOO_LARGE",
+        contentBytes: size.bytes,
+        contentLimitBytes: size.limit,
       });
-      return res.status(200).json({ message: "Report updated successfully. Send it to your supervisor or AI for analysis when ready.", report: updated });
     }
 
-    const report = await Report.create({
-      studentId: student.id,
-      title: title || "Internship report",
+    // Hash the stored bytes. The approval is bound to this hash, and the final
+    // submission re-checks it, so the file cannot be swapped after approval.
+    let fileHash = null;
+    try {
+      fileHash = await hashFile(filePath);
+    } catch (hashError) {
+      // A missing hash weakens the swap check but must not lose the upload.
+      console.warn("REPORT HASH ERROR:", hashError.message);
+    }
+
+    const existing = await Report.findOne({ where: { studentId: student.id } });
+
+    // A finalised report is immutable; only an administrator may unlock it.
+    if (existing?.lockedAt) {
+      return res.status(409).json({
+        message:
+          "This report has been finalised and can no longer be replaced. Contact an administrator if a correction is required.",
+        code: "REPORT_LOCKED",
+      });
+    }
+
+    const nextVersionNumber = existing ? (existing.version || 1) + 1 : 1;
+    const fileUrl = `/uploads/${req.file.filename}`;
+
+    const report = existing
+      ? await existing.update({
+          title: title || existing.title || "Internship report",
+          fileName: req.file.originalname,
+          fileUrl,
+          version: nextVersionNumber,
+          status: "submitted",
+          submittedAt: new Date(),
+          progress: 10,
+          documentContent,
+        })
+      : await Report.create({
+          studentId: student.id,
+          title: title || "Internship report",
+          fileName: req.file.originalname,
+          fileUrl,
+          version: 1,
+          status: "submitted",
+          submittedAt: new Date(),
+          progress: 10,
+          documentContent,
+        });
+
+    // Keep the immutable history. Previously this single row was updated in
+    // place, so a corrected report destroyed the version it replaced: the
+    // counter advanced while the file it referred to was gone.
+    const version = await ReportVersion.create({
+      reportId: report.id,
+      versionNumber: nextVersionNumber,
       fileName: req.file.originalname,
-      fileUrl: `/uploads/${req.file.filename}`,
-      version: 1,
-      status: "submitted",
-      submittedAt: new Date(),
-      progress: 10,
-      documentContent,
+      fileUrl,
+      fileHash,
+      fileType: req.file.mimetype || null,
+      fileSize: req.file.size || null,
+      extractedText: null,
+      uploadedBy: req.user.id,
     });
 
-    return res.status(201).json({ message: "Report uploaded. Send it to your supervisor or AI for analysis when ready.", report });
+    const updates = { currentVersionId: version.id };
+
+    // Any verdict from an open review round described the *previous* bytes, so
+    // it must stop counting. Reviews stay on record but the approval check only
+    // ever reads the current cycle, so advancing the cycle invalidates them
+    // without destroying history (integrity rules 4 and 12).
+    const currentCycle = report.reviewCycle || 1;
+    const openReviews = await ReportReview.count({
+      where: { reportId: report.id, cycle: currentCycle },
+    });
+
+    if (openReviews > 0) {
+      updates.reviewCycle = currentCycle + 1;
+      updates.submissionRequestedAt = null;
+    }
+
+    await report.update(updates);
+
+    return res.status(existing ? 200 : 201).json({
+      message: existing
+        ? "Report updated successfully. Send it to your supervisors for review when ready."
+        : "Report uploaded. Send it to your supervisors for review when ready.",
+      // The client needs to know straight away whether the file it just handed
+      // over can be opened for editing, or is view-only.
+      report: withFileFormat(report, version),
+      version: {
+        id: version.id,
+        versionNumber: version.versionNumber,
+        fileHash: version.fileHash,
+      },
+    });
   } catch (error) {
     console.error("SUBMIT REPORT ERROR:", error);
     return res.status(500).json({ message: "Unable to submit report", error: error.message });
@@ -267,7 +674,7 @@ const sendReportToSupervisor = async (req, res) => {
       type: "info",
     });
 
-    return res.status(200).json({ message: `Report sent to your ${supervisorTypeLabel} supervisor for review`, report, supervisorType: supervisorTypeLabel });
+    return res.status(200).json({ message: `Report sent to your ${supervisorTypeLabel} supervisor for review`, report: withFileFormat(report), supervisorType: supervisorTypeLabel });
   } catch (error) {
     console.error("SEND REPORT TO SUPERVISOR ERROR:", error);
     return res.status(500).json({ message: "Unable to send report", error: error.message });
@@ -282,29 +689,28 @@ const sendReportToAi = async (req, res) => {
     const report = await Report.findOne({ where: { id: req.params.id, studentId: student.id } });
     if (!report) return res.status(404).json({ message: "Report not found" });
 
-    // --- Read the PDF file from disk and extract text FIRST ---
-    // Extraction now happens before any state change or quota charge, so a PDF
+    // --- Read the report file from disk and extract text FIRST ---
+    // Extraction now happens before any state change or quota charge, so a file
     // whose text cannot be read costs the student nothing and leaves the report
-    // exactly as it was.
+    // exactly as it was. PDF and Word (.docx) reports both read here.
     let pdfText = null;
     if (report.fileUrl) {
       try {
         const relativeFile = report.fileUrl.replace(/^\/uploads\//, "");
         const filePath = path.join(process.cwd(), "uploads", relativeFile);
         if (fs.existsSync(filePath)) {
-          const buffer = fs.readFileSync(filePath);
-          const extracted = await extractTextFromPDF(buffer);
+          const extracted = await extractPlainText(filePath);
           pdfText = extracted.text;
         }
       } catch (pdfErr) {
-        console.error("PDF read/extract error (will skip AI):", pdfErr.message);
+        console.error("Report read/extract error (will skip AI):", pdfErr.message);
       }
     }
 
     if (!pdfText) {
       return res.status(200).json({
-        message: "Unable to extract text from this PDF — please ensure it contains selectable text. No AI request was used.",
-        report,
+        message: "Unable to extract text from this report — please ensure it contains selectable text. No AI request was used.",
+        report: withFileFormat(report),
       });
     }
 
@@ -332,7 +738,7 @@ const sendReportToAi = async (req, res) => {
       console.error("AI ANALYSIS FAILED (state restored, quota refunded):", aiError.message);
       return res.status(aiError.statusCode || 500).json({
         message: aiError.message || "Unable to send report to AI",
-        report,
+        report: withFileFormat(report),
         ...(refunded ? { quota: refunded } : {}),
       });
     }
@@ -353,7 +759,7 @@ const sendReportToAi = async (req, res) => {
       const refunded = await refundAiRequest(student);
       return res.status(200).json({
         message: "AI analysis ran but the response could not be parsed. Your daily request has been refunded — please try again.",
-        report,
+        report: withFileFormat(report),
         ...(refunded ? { quota: refunded } : {}),
       });
     }
@@ -421,7 +827,7 @@ const sendReportToAi = async (req, res) => {
 
     return res.status(200).json({
       message: "AI analysis complete",
-      report: updated,
+      report: withFileFormat(updated),
       aiScore,
       quota,
     });
@@ -891,6 +1297,10 @@ const getMySupervisorFeedback = async (req, res) => {
 
 export {
   getMyProfile,
+  updateMyInternship,
+  requestReportSubmission,
+  getReportSubmissionStatus,
+  finalSubmitReport,
   getMyReports,
   submitReport,
   deleteReport,

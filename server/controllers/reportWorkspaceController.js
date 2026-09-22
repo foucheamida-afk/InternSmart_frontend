@@ -1,22 +1,68 @@
 import Report from "../models/reportModel.js";
 import ReportComment from "../models/reportCommentModel.js";
+import ReportVersion from "../models/reportVersionModel.js";
 import Student from "../models/studentModel.js";
 import User from "../models/userModel.js";
 import Internship from "../models/studentAssignmentModel.js";
-import extractPdfText, { buildFallbackDocument } from "../utils/extractPdfText.js";
+import { extractDocumentContent, buildFallbackDocument, isContentlessDocument } from "../utils/documentExtraction.js";
+import { REPORT_FILE_KIND, reportFileKind } from "../utils/documentTypes.js";
+import { checkStorableDocumentContent, tooLargeMessage } from "../utils/storedContentLimit.js";
 import path from "path";
 import fs from "fs";
 
-const getAccess = async (reportId, user) => {
+// Exported so the Word import/export controller can re-use exactly the same
+// per-report access rules instead of growing a second, subtly different copy.
+export const getAccess = async (reportId, user) => {
   const report = await Report.findByPk(reportId, {
     include: [{ model: Student, as: "student", include: [{ model: Internship, as: "internship" }] }],
   });
   if (!report) return { report: null, access: false };
-  const internship = report.student?.internship;
-  const isStudent = user.role === "student" && report.student?.userId === user.id;
-  const isAcademic = user.role === "academic_supervisor" && internship?.academicSupervisorId === user.id;
-  const isProfessional = user.role === "professional_supervisor" && internship?.professionalSupervisorId === user.id;
-  return { report, access: isStudent || isAcademic || isProfessional };
+
+  let access = false;
+  if (user.role === "admin") {
+    access = true;
+  } else if (user.role === "student") {
+    const student = await Student.findOne({ where: { userId: user.id } });
+    if (student && report.studentId === student.id) {
+      access = true;
+    }
+  } else if (user.role === "academic_supervisor") {
+    const internship = report.student?.internship;
+    if (internship?.academicSupervisorId === user.id) {
+      access = true;
+    }
+  } else if (user.role === "professional_supervisor") {
+    const internship = report.student?.internship;
+    if (internship?.professionalSupervisorId === user.id) {
+      access = true;
+    }
+  }
+
+  return { report, access };
+};
+
+/**
+ * Which format a report was uploaded as, and whether that format may be edited.
+ *
+ * Both PDF and Word (.docx) reports are accepted, but they are not equivalent:
+ * a .docx was converted into editor content and is meant to be worked on here,
+ * while a .pdf is a fixed document the workspace may only display. The stored
+ * version row is the authority; `Report.fileName` mirrors it for older rows.
+ *
+ * Exported so the Word import/export controller reaches the same verdict rather
+ * than deciding "editable?" a second time.
+ */
+export const reportFileFormat = async (report) => {
+  const version = report.currentVersionId
+    ? await ReportVersion.findByPk(report.currentVersionId, {
+        attributes: ["id", "fileName", "fileType"],
+      })
+    : null;
+
+  const fileName = version?.fileName || report.fileName;
+  const fileType = reportFileKind({ fileType: version?.fileType, fileName });
+
+  return { fileType, fileName, editable: fileType === REPORT_FILE_KIND.DOCX };
 };
 
 const toEditableDocument = (value) => {
@@ -48,25 +94,82 @@ export const getReportWorkspace = async (req, res) => {
     const { report, access } = await getAccess(req.params.id, req.user);
     if (!report) return res.status(404).json({ message: "Report not found" });
     if (!access) return res.status(403).json({ message: "You are not assigned to this report" });
+
+    // A PDF report is view-only for everyone, its own author included: only a
+    // Word document uploaded as .docx is editable here. This is why the flag is
+    // computed from the file rather than from the requester's role alone.
+    const format = await reportFileFormat(report);
+    const readOnly = req.user.role !== "student" || !format.editable;
+
+    // A PDF is not converted into editor content, and nothing derived from it is
+    // stored: it has its own workspace, where the file is displayed as it is and
+    // edited through its extracted structure, with every save written back to the
+    // file. The response says so and stops here - running the conversion below
+    // would write the PDF's text into `documentContent`, which is exactly the
+    // second, drifting copy of the document this design exists to avoid.
+    if (format.fileType === REPORT_FILE_KIND.PDF) {
+      const comments = await ReportComment.findAll({
+        where: { reportId: report.id },
+        include: [{ model: User, as: "author", attributes: ["id", "name", "role"] }],
+        order: [["createdAt", "ASC"]],
+      });
+      return res.json({
+        report: {
+          id: report.id,
+          title: report.title,
+          status: report.status,
+          progress: report.progress,
+          updatedAt: report.updatedAt,
+          documentContent: null,
+          fileName: format.fileName,
+          fileType: format.fileType,
+        },
+        editable: false,
+        readOnly: true,
+        // The client uses this to hand the report to the PDF workspace instead of
+        // the writing workspace.
+        pdfWorkspace: true,
+        contentWarning: "This report is a PDF. It opens in the PDF workspace, where the file itself is displayed and its text is edited.",
+        comments,
+        sections: [],
+      });
+    }
+
     let documentContent = toEditableDocument(report.documentContent)
-    if (!documentContent && report.fileUrl) {
+    let contentWarning = null
+    const placeholder = () => buildFallbackDocument(report.fileName || report.title || "Uploaded report")
+
+    // No stored content means "never converted". Stored content that holds no text
+    // and no figures means the same thing in practice: it is what a failed
+    // conversion leaves behind, and treating it as the finished document is what
+    // made a converted-from-a-fresh-upload report open empty forever. Either way
+    // the file is still on disk, so it is read again here.
+    const needsConversion = !documentContent || isContentlessDocument(documentContent)
+    if (needsConversion && report.fileUrl) {
       const relativePath = report.fileUrl.replace(/^[/\\]+/, "")
       const absolutePath = path.join(process.cwd(), relativePath)
       if (fs.existsSync(absolutePath)) {
-        const extracted = await extractPdfText(absolutePath)
-        if (extracted) {
+        const extracted = await extractDocumentContent(absolutePath)
+        if (extracted && !isContentlessDocument(extracted)) {
           documentContent = extracted
-          await report.update({ documentContent: extracted }).catch(() => {})
+          await report.update({ documentContent: extracted }).catch((error) => {
+            // Reported rather than swallowed: the next load will simply try again,
+            // and an over-sized write is explained by storedContentLimit.
+            console.warn(`REPORT WORKSPACE: converted report ${report.id} but could not store the content: ${error.message}`)
+          })
         } else {
-          documentContent = buildFallbackDocument(report.fileName || report.title || "Uploaded report")
-          await report.update({ documentContent }).catch(() => {})
+          // The placeholder is deliberately NOT persisted. Leaving the row without
+          // content is what lets the next attempt try again - persisting it is how
+          // this report became permanently empty.
+          documentContent = documentContent || placeholder()
+          contentWarning = "The text of this report could not be read from the uploaded file, so the editor shows it as empty. Download the original file to check it, or upload a PDF version of the report."
         }
       } else {
-        documentContent = buildFallbackDocument(report.fileName || report.title || "Uploaded report")
+        documentContent = documentContent || placeholder()
+        contentWarning = "The file this report was uploaded from is no longer on the server, so its text cannot be shown. Upload the report again to restore it."
       }
-    } else if (!documentContent) {
-      documentContent = buildFallbackDocument(report.fileName || report.title || "Uploaded report")
     }
+    if (!documentContent) documentContent = placeholder()
     const comments = await ReportComment.findAll({
       where: { reportId: report.id },
       include: [{ model: User, as: "author", attributes: ["id", "name", "role"] }],
@@ -90,8 +193,23 @@ export const getReportWorkspace = async (req, res) => {
       }
     })()
     return res.json({
-      report: { id: report.id, title: report.title, status: report.status, progress: report.progress, updatedAt: report.updatedAt, documentContent },
-      readOnly: req.user.role !== "student",
+      report: {
+        id: report.id,
+        title: report.title,
+        status: report.status,
+        progress: report.progress,
+        updatedAt: report.updatedAt,
+        documentContent,
+        fileName: format.fileName,
+        fileType: format.fileType,
+      },
+      // `editable` says whether the *file* can be edited at all; `readOnly` folds
+      // that together with the requester's role, which is what the editor binds to.
+      editable: format.editable,
+      readOnly,
+      // Why the editor may have opened with nothing in it. Without this the page
+      // simply looks empty, which is indistinguishable from a broken feature.
+      contentWarning,
       comments,
       sections,
     });
@@ -106,8 +224,34 @@ export const saveReportWorkspace = async (req, res) => {
     const { report, access } = await getAccess(req.params.id, req.user);
     if (!report) return res.status(404).json({ message: "Report not found" });
     if (!access || req.user.role !== "student") return res.status(403).json({ message: "Only the student can edit this report" });
+
+    // Enforced here as well as in the load, so a PDF cannot be written to even if
+    // a client ignores the read-only flag it was handed.
+    const format = await reportFileFormat(report);
+    if (!format.editable) {
+      return res.status(409).json({
+        message: "This report was uploaded as a PDF and is view-only. Upload it as a Word (.docx) document to edit it in the workspace.",
+        code: "REPORT_NOT_EDITABLE",
+      });
+    }
+
     const updateData = { updatedAt: new Date() }
-    if (req.body.documentContent) updateData.documentContent = req.body.documentContent
+    if (req.body.documentContent) {
+      // Autosave sends the whole document, and a report with images in it passes
+      // the database's packet limit long before it looks large. Refusing it here
+      // means the workspace is told the save did not happen, instead of the
+      // connection being reset and the edits being silently lost.
+      const size = await checkStorableDocumentContent(req.body.documentContent);
+      if (size.tooLarge) {
+        return res.status(413).json({
+          message: tooLargeMessage(size, { subject: "These edits" }),
+          code: "REPORT_CONTENT_TOO_LARGE",
+          contentBytes: size.bytes,
+          contentLimitBytes: size.limit,
+        });
+      }
+      updateData.documentContent = req.body.documentContent
+    }
     if (req.body.title) updateData.title = req.body.title
     await report.update(updateData)
     return res.json({ message: "Report saved", updatedAt: report.updatedAt })

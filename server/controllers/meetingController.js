@@ -2,6 +2,7 @@ import Meeting from "../models/meetingModel.js";
 import Internship from "../models/studentAssignmentModel.js";
 import Student from "../models/studentModel.js";
 import User from "../models/userModel.js";
+import Notification from "../models/notificationModel.js";
 import { Op } from "sequelize";
 
 const generateJitsiLink = (meetingId, title) => {
@@ -177,6 +178,33 @@ export const initiateMeeting = async (req, res) => {
       : generateJitsiLink(`supervisor-${supervisorId}-${id}`, meeting.title);
 
     await meeting.update({ status: "scheduled", meetingLink: updatedLink });
+
+    let studentIdsToNotify = [];
+    if (meeting.isGroupMeeting && Array.isArray(meeting.studentIds) && meeting.studentIds.length > 0) {
+      studentIdsToNotify = meeting.studentIds;
+    } else if (meeting.studentId) {
+      studentIdsToNotify = [meeting.studentId];
+    }
+
+    if (studentIdsToNotify.length > 0) {
+      const targetStudents = await Student.findAll({
+        where: { id: studentIdsToNotify },
+        attributes: ["id", "userId"],
+      });
+
+      for (const s of targetStudents) {
+        if (s.userId) {
+          await Notification.create({
+            userId: s.userId,
+            title: "Meeting Started",
+            message: `Meeting "${meeting.title}" has started. Join now!`,
+            type: "info",
+            meetingLink: updatedLink,
+          });
+        }
+      }
+    }
+
     return res.status(200).json({ message: "Meeting initiated", meeting, link: updatedLink });
   } catch (error) {
     console.error("INITIATE MEETING ERROR:", error);
