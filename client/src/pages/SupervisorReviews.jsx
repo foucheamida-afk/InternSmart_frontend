@@ -11,11 +11,15 @@ import {
   Inbox,
   Library,
   LoaderCircle,
+  Menu,
   RefreshCw,
   ThumbsDown,
   ThumbsUp,
+  X,
+  LogOut,
 } from 'lucide-react'
 import ThemeToggle from '../components/ThemeToggle'
+import Sidebar from '../components/Sidebar'
 import { useAuth } from '../context/AuthContext'
 import { getStoredToken, clearStoredAuth } from '../utils/storage'
 import {
@@ -176,6 +180,9 @@ const SupervisorReviews = () => {
   // No shared Sidebar here on purpose: that component's navigation is
   // student-scoped (My Reports, Writing Workspace, ...) and would offer a
   // supervisor links that ProtectedRoute immediately bounces them off.
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+
   const dashboardHome = () =>
     user?.role === 'professional_supervisor' ? '/professional-supervisor' : '/supervisor'
 
@@ -251,42 +258,62 @@ const SupervisorReviews = () => {
 
   return (
     <div className="dashboard-wrapper">
+      <Sidebar isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen(!isSidebarOpen)} />
+
       <div className="dashboard-main">
         <header className="dashboard-header">
           <div className="header-left">
+            <button className="mobile-menu-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+              {isSidebarOpen ? <X size={24} /> : <Menu size={24} />}
+            </button>
             <button
               type="button"
               onClick={() => navigate(dashboardHome())}
-              className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition"
+              className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition cursor-pointer"
               style={{ borderColor: 'var(--line)', color: 'var(--text-soft)' }}
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               Back to dashboard
             </button>
             <div className="program-info">
-              <span>{supervisorLabel(user?.role)}</span>
+              <Inbox size={16} />
+              <span>{supervisorLabel(user?.role)} - Reviews</span>
             </div>
-            <button
-              type="button"
-              onClick={() => navigate('/library')}
-              className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition"
-              style={{ borderColor: 'var(--line)', color: 'var(--text-soft)' }}
-            >
-              <Library className="h-3.5 w-3.5" /> Report Library
-            </button>
           </div>
 
           <div className="header-right">
             <ThemeToggle />
-            <div className="user-menu cursor-pointer" onClick={handleSignOut} title="Sign out">
-              <div className="user-avatar">
-                <div className="avatar-placeholder">{user?.name?.charAt(0)}</div>
+            <div className="header-divider"></div>
+            <div className="relative">
+              <div
+                className="user-menu cursor-pointer"
+                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              >
+                <div className="user-avatar">
+                  <div className="avatar-placeholder">{user?.name?.charAt(0) || 'S'}</div>
+                </div>
+                <div className="user-info">
+                  <div className="user-name">{user?.name || 'Supervisor'}</div>
+                  <div className="user-role">{user?.role?.replace('_', ' ') || 'Supervisor'}</div>
+                </div>
+                <ChevronDown size={16} />
               </div>
-              <div className="user-info">
-                <div className="user-name">{user?.name}</div>
-                <div className="user-role">Sign out</div>
-              </div>
-              <ChevronDown size={16} />
+
+              {isUserMenuOpen && (
+                <div className="absolute right-0 mt-2 w-48 rounded-xl border p-2 shadow-2xl z-50 text-xs" style={{
+                  backgroundColor: 'var(--bg-panel)',
+                  borderColor: 'var(--line)',
+                  color: 'var(--text)'
+                }}>
+                  <button
+                    onClick={handleSignOut}
+                    className="w-full flex items-center gap-2 p-2 rounded text-left cursor-pointer"
+                    style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}
+                  >
+                    <LogOut size={14} /> Sign out
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </header>

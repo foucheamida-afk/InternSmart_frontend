@@ -10,13 +10,14 @@ import logoImg from '@assets/images/logo.png'
 import '../assets/css/dashboard.css'
 import '../assets/css/dashboard-components.css'
 import ThemeToggle from '../components/ThemeToggle'
+import Sidebar from '../components/Sidebar'
 import RoleSwitcher from '../components/RoleSwitcher'
 import { supervisorApi } from '../services/supervisorService'
 import api from '../api/axios'
 import TimelineCard from '../components/dashboard/TimelineCard'
 import InspectSubmissionModal from '../components/dashboard/InspectSubmissionModal'
 import { useAuth } from '../context/AuthContext'
-import { getStoredToken } from '../utils/storage'
+import { getStoredToken, getStoredUser } from '../utils/storage'
 
 const getLocalDateTime = () => {
   const now = new Date()
@@ -251,17 +252,26 @@ export default function SupervisorDashboard() {
         avgProgress,
       })
 
-      const token = getStoredToken()
-      if (token) {
-        try {
-          const payload = JSON.parse(atob(token.split('.')[1]))
-          setSupervisor({
-            name: payload.name || 'Supervisor',
-            email: payload.email,
-            role: payload.role,
-          })
-        } catch {
-          // ignore
+      const storedUser = getStoredUser()
+      if (storedUser && storedUser.name) {
+        setSupervisor({
+          name: storedUser.name,
+          email: storedUser.email,
+          role: storedUser.role,
+        })
+      } else {
+        const token = getStoredToken()
+        if (token) {
+          try {
+            const payload = JSON.parse(atob(token.split('.')[1]))
+            setSupervisor({
+              name: payload.name || 'Supervisor',
+              email: payload.email,
+              role: payload.role,
+            })
+          } catch {
+            // ignore
+          }
         }
       }
     } catch (err) {
@@ -478,87 +488,12 @@ export default function SupervisorDashboard() {
 
   return (
     <div className="dashboard-wrapper">
-      {/* Supervisor Sidebar */}
-      <aside className={`sidebar ${isSidebarOpen ? 'open' : ''}`}>
-        <div className="sidebar-header">
-          <button className="sidebar-close" onClick={() => setIsSidebarOpen(false)}>
-            <X size={24} />
-          </button>
-          <div className="sidebar-logo">
-            <div className="logo-icon">
-              <img
-                src={logoImg}
-                alt="InternSmart logo"
-                className="h-11 w-11 rounded-2xl"
-              />
-            </div>
-            <div className="logo-text">
-              <div className="logo-brand">InternSmart</div>
-              <div className="logo-subtitle">ACADEMIC SUPERVISOR</div>
-            </div>
-          </div>
-        </div>
-
-        <nav className="sidebar-nav">
-          <button 
-            type="button" 
-            className={`sidebar-nav-item ${activeTab === 'interns' ? 'active' : ''}`}
-            onClick={() => setActiveTab('interns')}
-          >
-            <Users size={18} className="nav-icon" />
-            <span className="nav-label">My Interns</span>
-          </button>
-          <button
-            type="button"
-            className={`sidebar-nav-item ${activeTab === 'tasks' ? 'active' : ''}`}
-            onClick={() => setActiveTab('tasks')}
-          >
-            <FileText size={18} className="nav-icon" />
-            <span className="nav-label">Tasks</span>
-          </button>
-          <button type="button" className={`sidebar-nav-item ${activeTab === 'writing' ? 'active' : ''}`} onClick={() => setActiveTab('writing')}>
-            <FileText size={18} className="nav-icon" />
-            <span className="nav-label">Writing Spaces</span>
-          </button>
-          <button
-            type="button"
-            className={`sidebar-nav-item ${activeTab === 'reports' ? 'active' : ''}`}
-            onClick={() => setActiveTab('reports')}
-          >
-            <FileCheck size={18} className="nav-icon" />
-            <span className="nav-label">Reports</span>
-          </button>
-          <button
-            type="button"
-            className={`sidebar-nav-item ${activeTab === 'meetings' ? 'active' : ''}`}
-            onClick={() => setActiveTab('meetings')}
-          >
-            <Calendar size={18} className="nav-icon" />
-            <span className="nav-label">Meetings</span>
-          </button>
-          <button
-            type="button"
-            className={`sidebar-nav-item ${activeTab === 'grading' ? 'active' : ''}`}
-            onClick={() => setActiveTab('grading')}
-          >
-            <GraduationCap size={18} className="nav-icon" />
-            <span className="nav-label">Grading</span>
-          </button>
-          {/* Report validation lives on its own page because it is shared with
-              the professional-supervisor capacity (§4.12). */}
-          <button type="button" className="sidebar-nav-item" onClick={() => navigate('/reviews')}>
-            <Inbox size={18} className="nav-icon" />
-            <span className="nav-label">Report Reviews</span>
-          </button>
-          <RoleSwitcher />
-        </nav>
-
-        <div className="sidebar-ai-card">
-          <div className="ai-card-icon">✦</div>
-          <div className="ai-card-title">Supervisor AI Assistant</div>
-          <p className="ai-card-description">Auto-generate review feedback & rubric criteria.</p>
-        </div>
-      </aside>
+      <Sidebar
+        isOpen={isSidebarOpen}
+        onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+      />
 
       {/* Main Content */}
       <div className="dashboard-main">

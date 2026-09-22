@@ -757,8 +757,8 @@ export default function AIFeedback() {
                 ];
 
             return (
-              <div className="fixed inset-0 bg-black/75 backdrop-blur-md flex flex-col z-50 p-4 md:p-6 overflow-hidden">
-                <div className="rounded-2xl border shadow-2xl w-full h-full flex flex-col overflow-hidden" style={{
+              <div className="fixed top-0 bottom-0 right-0 left-0 md:left-64 bg-black/60 backdrop-blur-sm flex flex-col z-40 p-3 md:p-5 overflow-hidden transition-all">
+                <div className="rounded-2xl border shadow-2xl w-full max-w-6xl mx-auto h-full flex flex-col overflow-hidden" style={{
                   backgroundColor: 'var(--bg-panel)',
                   borderColor: 'var(--line)',
                   color: 'var(--text)'
@@ -819,14 +819,25 @@ export default function AIFeedback() {
                       </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setShowErrorInspector(false)}
-                      className="p-2 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer border border-transparent hover:border-white/20"
-                      title="Exit expanded view"
-                    >
-                      <Minimize2 size={20} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowErrorInspector(false)}
+                        className="px-3.5 py-1.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 font-semibold text-xs transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                        title="Exit expanded view and return to main page"
+                      >
+                        <Minimize2 size={16} />
+                        <span>Exit Expanded View</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowErrorInspector(false)}
+                        className="p-1.5 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition cursor-pointer"
+                        title="Close expanded workspace"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Modal Body Container */}

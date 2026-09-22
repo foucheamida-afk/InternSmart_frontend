@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { adminApi } from '../../services/adminService'
 import useCountUp from '../../hooks/useCountUp'
+import { getStoredUser } from '../../utils/storage'
 
 const EmptyState = ({ icon: Icon, title, description }) => (
   <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -203,7 +204,9 @@ export default function AdminOverview() {
     <div>
       <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold tracking-[-0.06em]" style={{ color: 'var(--text)' }}>Dashboard</h1>
+          <h1 className="text-3xl font-semibold tracking-[-0.06em]" style={{ color: 'var(--text)' }}>
+            Welcome back, {getStoredUser()?.name || 'Administrator'}
+          </h1>
           <p className="mt-2 text-sm" style={{ color: 'var(--text-muted)' }}>
             Platform overview and key metrics.
           </p>

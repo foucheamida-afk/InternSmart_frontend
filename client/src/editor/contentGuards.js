@@ -66,3 +66,4 @@ export const plainTextDocument = (value) => {
     .filter((paragraph) => paragraph.content[0].text.trim())
   return { type: 'doc', content: paragraphs.length ? paragraphs : [{ type: 'paragraph' }] }
 }
+

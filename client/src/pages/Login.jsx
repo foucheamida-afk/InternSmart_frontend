@@ -127,7 +127,7 @@ const Login = () => {
       // =========================
       if (!response.ok) {
         setServerError(
-          data.message || "Invalid email or password"
+          data.message || data.error || "Invalid email or password"
         );
         return;
       }

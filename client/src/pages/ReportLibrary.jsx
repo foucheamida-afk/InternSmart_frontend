@@ -12,13 +12,17 @@ import {
   GraduationCap,
   LoaderCircle,
   Lock,
+  Menu,
   RefreshCw,
   Search,
   ShieldCheck,
   Users,
   X,
+  LogOut,
+  User,
 } from 'lucide-react'
 import ThemeToggle from '../components/ThemeToggle'
+import Sidebar from '../components/Sidebar'
 import { useAuth } from '../context/AuthContext'
 import { getStoredToken, clearStoredAuth } from '../utils/storage'
 import { API_ORIGIN } from '../services/apiBase'
@@ -29,6 +33,7 @@ import {
   openLibraryReport,
   setLibraryVisibility,
   setLibraryDetails,
+  deleteLibraryEntry,
 } from '../services/libraryService'
 import '../assets/css/dashboard.css'
 import '../assets/css/dashboard-components.css'
@@ -163,6 +168,7 @@ const DetailPanel = ({ entryId, onClose, canAdminister, onChanged }) => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [notice, setNotice] = useState('')
 
   // Abstract and keywords are the metadata that makes this entry findable. They
@@ -224,6 +230,26 @@ const DetailPanel = ({ entryId, onClose, canAdminister, onChanged }) => {
       setError(err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const removeEntry = async () => {
+    if (!window.confirm('Remove this report from the library? This action cannot be undone.')) {
+      return
+    }
+
+    setDeleting(true)
+    setError('')
+    setNotice('')
+    try {
+      const data = await deleteLibraryEntry(entryId)
+      setNotice(data.message)
+      onChanged?.()
+      onClose()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -466,6 +492,18 @@ const DetailPanel = ({ entryId, onClose, canAdminister, onChanged }) => {
                     </button>
                   ))}
                 </div>
+
+                <div className="mt-4 border-t pt-4" style={{ borderColor: 'var(--line)' }}>
+                  <button
+                    type="button"
+                    onClick={removeEntry}
+                    disabled={deleting}
+                    className="rounded-full border px-3 py-1.5 text-xs font-medium text-red-300 transition disabled:opacity-50"
+                    style={{ borderColor: 'rgba(248,113,113,0.45)', backgroundColor: 'rgba(239,68,68,0.08)' }}
+                  >
+                    {deleting ? 'Removing…' : 'Remove from library'}
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -477,7 +515,7 @@ const DetailPanel = ({ entryId, onClose, canAdminister, onChanged }) => {
 
 const ReportLibrary = () => {
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
 
   const [entries, setEntries] = useState([])
   const [facets, setFacets] = useState({ academicYears: [], programs: [], companies: [], domains: [] })
@@ -485,6 +523,8 @@ const ReportLibrary = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(null)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
 
   const roles = Array.isArray(user?.roles) && user.roles.length ? user.roles : [user?.role]
   const canAdminister = roles.includes('admin')
@@ -526,22 +566,70 @@ const ReportLibrary = () => {
     [filters]
   )
 
+  const handleSignOut = () => {
+    logout()
+    navigate('/login')
+  }
+
   return (
     <div className="dashboard-wrapper">
+      <Sidebar isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen(!isSidebarOpen)} />
+
       <div className="dashboard-main">
         <header className="dashboard-header">
           <div className="header-left">
+            <button className="mobile-menu-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+              {isSidebarOpen ? <X size={24} /> : <Menu size={24} />}
+            </button>
             <button
               type="button"
               onClick={() => navigate(roleHome(user?.role))}
-              className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium transition"
+              className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition"
               style={{ borderColor: 'var(--line)', color: 'var(--text-soft)' }}
             >
               <ArrowLeft className="h-3.5 w-3.5" /> Back to dashboard
             </button>
+            <div className="program-info">
+              <BookOpen size={16} />
+              <span>Report Library</span>
+            </div>
           </div>
           <div className="header-right">
             <ThemeToggle />
+            <div className="header-divider"></div>
+            <div className="relative">
+              <div
+                className="user-menu cursor-pointer"
+                onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              >
+                <div className="user-avatar">
+                  <div className="avatar-placeholder">
+                    {user?.name?.charAt(0) || 'U'}
+                  </div>
+                </div>
+                <div className="user-info">
+                  <div className="user-name">{user?.name || 'User'}</div>
+                  <div className="user-role">{user?.role?.replace('_', ' ') || 'Member'}</div>
+                </div>
+                <ChevronDown size={16} />
+              </div>
+
+              {isUserMenuOpen && (
+                <div className="absolute right-0 mt-2 w-48 rounded-xl border p-2 shadow-2xl z-50 text-xs" style={{
+                  backgroundColor: 'var(--bg-panel)',
+                  borderColor: 'var(--line)',
+                  color: 'var(--text)'
+                }}>
+                  <button
+                    onClick={handleSignOut}
+                    className="w-full flex items-center gap-2 p-2 rounded text-left cursor-pointer"
+                    style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: '#ef4444' }}
+                  >
+                    <LogOut size={14} /> Sign out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 

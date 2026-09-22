@@ -477,7 +477,7 @@ export default function AdminDashboard() {
                       required
                       value={newUser.name}
                       onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                      placeholder="e.g. John Doe"
+                      placeholder="e.g. Enter your name"
                       className="w-full rounded-xl border p-2.5 text-xs focus:outline-none"
                       style={{
                         backgroundColor: 'var(--bg-panel)',

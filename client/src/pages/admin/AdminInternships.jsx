@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Search, Briefcase } from 'lucide-react'
+import { Search, Briefcase, CheckCircle2, Clock, FileEdit, AlertCircle } from 'lucide-react'
 import { adminApi } from '../../services/adminService'
 
 const EmptyState = ({ icon: Icon, title, description }) => (
@@ -15,6 +15,24 @@ const EmptyState = ({ icon: Icon, title, description }) => (
     <p className="mt-2 max-w-sm text-sm" style={{ color: 'var(--text-muted)' }}>{description}</p>
   </div>
 )
+
+const getStageColor = (statusKey) => {
+  switch (statusKey) {
+    case 'completed': return '#10b981' // Green
+    case 'revision': return '#f59e0b' // Amber
+    case 'in_review': return '#3b82f6' // Blue
+    case 'draft': return '#8b5cf6' // Purple
+    default: return '#6b7280' // Gray
+  }
+}
+
+const getProgressGradient = (statusKey, percent) => {
+  if (percent === 100) return 'linear-gradient(to right, #059669, #10b981)'
+  if (statusKey === 'revision') return 'linear-gradient(to right, #d97706, #f59e0b)'
+  if (statusKey === 'in_review') return 'linear-gradient(to right, #2563eb, #3b82f6)'
+  if (statusKey === 'draft') return 'linear-gradient(to right, #7c3aed, #8b5cf6)'
+  return 'linear-gradient(to right, #4b5563, #6b7280)'
+}
 
 export default function AdminInternships() {
   const [internships, setInternships] = useState([])
@@ -47,7 +65,7 @@ export default function AdminInternships() {
       <div className="mb-6">
         <h1 className="text-3xl font-semibold tracking-[-0.06em]" style={{ color: 'var(--text)' }}>Internships</h1>
         <p className="mt-2 text-sm" style={{ color: 'var(--text-muted)' }}>
-          View all internship assignments and company placements.
+          Track student submission progress, supervisor assignments, and company placements.
         </p>
       </div>
 
@@ -90,18 +108,64 @@ export default function AdminInternships() {
               <thead>
                 <tr className="border-b text-[11px] uppercase tracking-wider" style={{ borderColor: 'var(--line)', color: 'var(--text-muted)' }}>
                   <th className="pb-3 font-semibold px-4">Student</th>
+                  <th className="pb-3 font-semibold px-4">Work & Submission Progress</th>
                   <th className="pb-3 font-semibold px-4">Academic Supervisor</th>
+                  <th className="pb-3 font-semibold px-4">Company</th>
                 </tr>
               </thead>
               <tbody className="divide-y" style={{ borderColor: 'var(--line)' }}>
-                {internships.map((internship) => (
-                  <tr key={internship.id} className="hover:bg-white/[0.02] transition">
-                    <td className="py-3.5 px-4 font-semibold" style={{ color: 'var(--text)' }}>
-                      {internship.student?.user?.name || '—'}
-                    </td>
-                    <td className="py-3.5 px-4">{internship.academicSupervisor?.name || '—'}</td>
-                  </tr>
-                ))}
+                {internships.map((internship) => {
+                  const studentName = internship.student?.user?.name || '—'
+                  const studentEmail = internship.student?.user?.email || ''
+                  const progress = internship.progress || { percent: 0, stage: 'Not Started', statusKey: 'not_started' }
+                  const stageColor = getStageColor(progress.statusKey)
+
+                  return (
+                    <tr key={internship.id} className="hover:bg-white/[0.02] transition">
+                      {/* Student info */}
+                      <td className="py-3.5 px-4 font-semibold" style={{ color: 'var(--text)' }}>
+                        <div>{studentName}</div>
+                        {studentEmail && (
+                          <div className="text-[11px] font-normal" style={{ color: 'var(--text-muted)' }}>
+                            {studentEmail}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Work Progress Bar */}
+                      <td className="py-3.5 px-4 min-w-[240px]">
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center justify-between text-[11px] font-medium">
+                            <span className="inline-flex items-center gap-1.5" style={{ color: stageColor }}>
+                              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: stageColor }} />
+                              {progress.stage}
+                            </span>
+                            <span className="font-semibold" style={{ color: 'var(--text)' }}>
+                              {progress.percent}%
+                            </span>
+                          </div>
+
+                          {/* Progress track */}
+                          <div className="h-2 w-full overflow-hidden rounded-full" style={{ backgroundColor: 'rgba(255, 255, 255, 0.08)' }}>
+                            <div
+                              className="h-full rounded-full transition-all duration-500"
+                              style={{
+                                width: `${progress.percent}%`,
+                                background: getProgressGradient(progress.statusKey, progress.percent)
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Academic Supervisor */}
+                      <td className="py-3.5 px-4">{internship.academicSupervisor?.name || '—'}</td>
+
+                      {/* Company */}
+                      <td className="py-3.5 px-4">{internship.company || '—'}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

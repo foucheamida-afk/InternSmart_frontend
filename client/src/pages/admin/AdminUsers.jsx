@@ -425,7 +425,7 @@ export default function AdminUsers() {
                   required
                   value={newUser.name}
                   onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                  placeholder="e.g. John Doe"
+                  placeholder="e.g. Enter you full name"
                   className="w-full rounded-xl border p-2.5 text-xs focus:outline-none"
                   style={{
                     backgroundColor: 'var(--bg)',
@@ -442,7 +442,7 @@ export default function AdminUsers() {
                   type="email"
                   value={newUser.email}
                   onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  placeholder="e.g. john@example.com"
+                  placeholder="e.g. mack@example.com"
                   className="w-full rounded-xl border p-2.5 text-xs focus:outline-none"
                   style={{
                     backgroundColor: 'var(--bg)',

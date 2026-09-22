@@ -35,6 +35,12 @@ export const savePdfFile = async (reportId, blob) => {
   return data
 }
 
+/** Patch specific modified text blocks in the PDF file on disk. */
+export const patchPdfFile = async (reportId, changes) => {
+  const { data } = await api.put(`${base(reportId)}/patch`, { changes })
+  return data
+}
+
 /**
  * Where the file itself can be displayed.
  *
@@ -76,6 +82,7 @@ export const deletePdfComment = async (reportId, commentId) => {
 export default {
   getPdfWorkspace,
   savePdfFile,
+  patchPdfFile,
   pdfFileViewerUrl,
   downloadPdfFile,
   addPdfComment,

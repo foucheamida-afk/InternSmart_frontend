@@ -490,7 +490,7 @@ export default function WritingWorkspace() {
   useEffect(() => {
     if (!reportId || !title || isReadOnly) return
     const timeout = setTimeout(() => {
-      api.put(`/workspace/reports/${reportId}/workspace`, { title }).catch(() => {})
+      api.put(`/workspace/reports/${reportId}/workspace`, { title }).catch(() => { })
     }, 1000)
     return () => clearTimeout(timeout)
   }, [title, reportId, isReadOnly])
@@ -889,10 +889,10 @@ export default function WritingWorkspace() {
 
   const activeStyle = editor?.isActive('heading', { level: 1 }) ? '1' :
     editor?.isActive('heading', { level: 2 }) ? '2' :
-    editor?.isActive('heading', { level: 3 }) ? '3' :
-    editor?.isActive('heading', { level: 4 }) ? '4' :
-    editor?.isActive('heading', { level: 5 }) ? '5' :
-    editor?.isActive('blockquote') ? '6' : '0'
+      editor?.isActive('heading', { level: 3 }) ? '3' :
+        editor?.isActive('heading', { level: 4 }) ? '4' :
+          editor?.isActive('heading', { level: 5 }) ? '5' :
+            editor?.isActive('blockquote') ? '6' : '0'
 
   const handleStyleChange = (val) => {
     const level = Number(val)
@@ -921,11 +921,11 @@ export default function WritingWorkspace() {
           <div className="ww-ribbon-small-group">
             <ToolbarButton label="Cut" onClick={() => {
               const sel = window.getSelection()?.toString()
-              if (sel) { navigator.clipboard.writeText(sel).catch(() => {}); editor?.chain().focus().deleteSelection().run() }
+              if (sel) { navigator.clipboard.writeText(sel).catch(() => { }); editor?.chain().focus().deleteSelection().run() }
             }} title="Cut"><Scissors size={15} /></ToolbarButton>
             <ToolbarButton label="Copy" onClick={() => {
               const sel = window.getSelection()?.toString()
-              if (sel) navigator.clipboard.writeText(sel).catch(() => {})
+              if (sel) navigator.clipboard.writeText(sel).catch(() => { })
             }} title="Copy"><Copy size={15} /></ToolbarButton>
             <ToolbarButton label="Format Painter" onClick={handleFormatPainter} title="Format Painter"><Paintbrush size={15} /></ToolbarButton>
           </div>
@@ -1545,11 +1545,10 @@ export default function WritingWorkspace() {
                         title="Inspect Exact Errors, Explanations & Suggested Answers"
                         aria-label="Inspect Exact Errors"
                         onClick={() => setShowWorkspaceErrorInspector(true)}
-                        className={`relative p-1.5 rounded-lg border transition cursor-pointer flex items-center justify-center ${
-                          showWorkspaceErrorInspector
+                        className={`relative p-1.5 rounded-lg border transition cursor-pointer flex items-center justify-center ${showWorkspaceErrorInspector
                             ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 ring-2 ring-amber-500/30'
                             : 'bg-[var(--bg-panel)] text-amber-400 border-[var(--line)] hover:bg-amber-500/10 hover:border-amber-500/40'
-                        }`}
+                          }`}
                       >
                         <AlertCircle size={15} className="text-amber-400 animate-pulse" />
                         <span className="absolute -top-1 -right-1 rounded-full bg-amber-500 text-black px-1 text-[8px] font-bold">
@@ -1724,33 +1723,30 @@ export default function WritingWorkspace() {
                   <button
                     type="button"
                     onClick={() => setExpandedWorkspaceViewMode('split')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                      expandedWorkspaceViewMode === 'split'
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${expandedWorkspaceViewMode === 'split'
                         ? 'bg-orange-500 text-white shadow'
                         : 'text-[var(--text-soft)] hover:text-[var(--text)]'
-                    }`}
+                      }`}
                   >
                     <Split size={14} /> Split View
                   </button>
                   <button
                     type="button"
                     onClick={() => setExpandedWorkspaceViewMode('chat')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                      expandedWorkspaceViewMode === 'chat'
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${expandedWorkspaceViewMode === 'chat'
                         ? 'bg-orange-500 text-white shadow'
                         : 'text-[var(--text-soft)] hover:text-[var(--text)]'
-                    }`}
+                      }`}
                   >
                     <MessageSquare size={14} /> Wide Chat
                   </button>
                   <button
                     type="button"
                     onClick={() => setExpandedWorkspaceViewMode('errors')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                      expandedWorkspaceViewMode === 'errors'
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${expandedWorkspaceViewMode === 'errors'
                         ? 'bg-orange-500 text-white shadow'
                         : 'text-[var(--text-soft)] hover:text-[var(--text)]'
-                    }`}
+                      }`}
                   >
                     <AlertCircle size={14} /> Section Errors ({workspaceErrorItems.length})
                   </button>
@@ -1768,9 +1764,8 @@ export default function WritingWorkspace() {
 
               {/* Modal Body Container */}
               <div className="flex-1 min-h-0 p-4 md:p-6 overflow-hidden">
-                <div className={`h-full gap-6 overflow-hidden ${
-                  expandedWorkspaceViewMode === 'split' ? 'grid grid-cols-1 lg:grid-cols-2' : 'flex flex-col max-w-4xl mx-auto'
-                }`}>
+                <div className={`h-full gap-6 overflow-hidden ${expandedWorkspaceViewMode === 'split' ? 'grid grid-cols-1 lg:grid-cols-2' : 'flex flex-col max-w-4xl mx-auto'
+                  }`}>
 
                   {/* ── LEFT PANE: WIDE CHATBOT STREAM ── */}
                   {(expandedWorkspaceViewMode === 'split' || expandedWorkspaceViewMode === 'chat') && (
@@ -1800,11 +1795,10 @@ export default function WritingWorkspace() {
                           aiMessages.map((m) => (
                             <div key={m.id} className={`flex flex-col ${m.sender === 'user' ? 'items-end' : 'items-start'}`}>
                               <div
-                                className={`max-w-[85%] rounded-2xl p-4 leading-relaxed text-xs shadow-md ${
-                                  m.sender === 'user'
+                                className={`max-w-[85%] rounded-2xl p-4 leading-relaxed text-xs shadow-md ${m.sender === 'user'
                                     ? 'text-white rounded-br-none'
                                     : 'border rounded-bl-none'
-                                }`}
+                                  }`}
                                 style={{
                                   background: m.sender === 'user'
                                     ? 'linear-gradient(135deg, var(--orange), var(--orange-3))'
@@ -1916,9 +1910,8 @@ export default function WritingWorkspace() {
                               <span className="text-[11px] px-3 py-1 rounded-full font-mono font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30">
                                 Section: {item.section} • {item.category}
                               </span>
-                              <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase ${
-                                item.type === 'high' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                              }`}>
+                              <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase ${item.type === 'high' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                }`}>
                                 {item.type} priority
                               </span>
                             </div>

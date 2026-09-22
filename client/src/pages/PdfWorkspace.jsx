@@ -9,16 +9,18 @@ import {
 } from 'lucide-react'
 
 import PdfFilePreview from '../components/PdfWorkspace/PdfFilePreview'
+import PdfPageCanvas from '../components/PdfWorkspace/PdfPageCanvas'
 import { usePdfCollaboration } from '../components/PdfWorkspace/usePdfCollaboration'
 import { buildPdfEditorExtensions } from '../editor/pdfEditorExtensions'
 import { sanitizeEditorContent } from '../editor/contentGuards'
-import { documentHasContent, outlineFromDocument, renderDocumentToPdf } from '../editor/pdfDocument'
+import { documentHasContent, outlineFromDocument } from '../editor/pdfDocument'
 import { getStoredUser } from '../utils/storage'
 import {
   addPdfComment,
   deletePdfComment,
   downloadPdfFile,
   getPdfWorkspace,
+  patchPdfFile,
   savePdfFile,
 } from '../services/pdfWorkspaceService'
 import '../assets/css/pdf-workspace.css'
@@ -181,11 +183,16 @@ const PdfWorkspaceSession = ({ workspace, reportId, currentUser, onCommentsChang
     // Run asynchronously: filling a shared document is coordination with the
     // collaboration server, not a render-phase decision.
     const run = async () => {
-      if (ydoc.getXmlFragment('default').length > 0) {
+      const currentDoc = editor.getJSON()
+      const hasContent = Array.isArray(currentDoc?.content) && currentDoc.content.some(
+        (node) => node.type === 'pdfPage' || node.type === 'pdfBlock'
+      )
+
+      if (hasContent) {
         markSeeded()
         if (!cancelled) {
           setAwaitingAuthor(false)
-          setOutline(outlineFromDocument(editor.getJSON()))
+          setOutline(outlineFromDocument(currentDoc))
         }
         return
       }
@@ -212,6 +219,64 @@ const PdfWorkspaceSession = ({ workspace, reportId, currentUser, onCommentsChang
 
   // --- saving ---------------------------------------------------------------
 
+  const extractChangesFromEditor = useCallback((documentJson) => {
+    const changes = []
+    if (!documentJson || !Array.isArray(documentJson.content)) return changes
+
+    const getRunText = (contentArray) => {
+      if (!Array.isArray(contentArray)) return ''
+      return contentArray
+        .map((child) => {
+          if (child.type === 'text') return child.text || ''
+          if (child.content) return getRunText(child.content)
+          return ''
+        })
+        .join('')
+    }
+
+    const hasMark = (contentArray, markType) => {
+      if (!Array.isArray(contentArray)) return false
+      return contentArray.some((child) =>
+        Array.isArray(child.marks) && child.marks.some((m) => m.type === markType)
+      )
+    }
+
+    for (const pageNode of documentJson.content) {
+      if (pageNode.type !== 'pdfPage' || !Array.isArray(pageNode.content)) continue
+      const pageNum = Number(pageNode.attrs?.page) || 1
+
+      for (const blockNode of pageNode.content) {
+        if (blockNode.type !== 'pdfBlock') continue
+        const attrs = blockNode.attrs || {}
+        const currentText = getRunText(blockNode.content).trim()
+        const originalText = String(attrs.originalText || '').trim()
+
+        if (currentText === originalText) continue
+
+        changes.push({
+          id: attrs.id || `p${pageNum}-b${changes.length}`,
+          page: pageNum,
+          x: attrs.x,
+          y: attrs.y,
+          width: attrs.width,
+          height: attrs.height || (attrs.fontSize ? attrs.fontSize * 1.3 : 20),
+          fontSize: attrs.fontSize,
+          fontFamily: attrs.fontFamily,
+          fontName: attrs.fontName,
+          align: attrs.align,
+          lineHeight: attrs.lineHeight,
+          ascent: attrs.ascent,
+          originalText,
+          currentText,
+          bold: hasMark(blockNode.content, 'bold'),
+          italic: hasMark(blockNode.content, 'italic'),
+        })
+      }
+    }
+
+    return changes
+  }, [])
+
   const saveNow = useCallback(async ({ manual = false } = {}) => {
     if (!editor || !canWrite || savingRef.current) return null
     if (!dirtyRef.current && !manual) return null
@@ -219,39 +284,45 @@ const PdfWorkspaceSession = ({ workspace, reportId, currentUser, onCommentsChang
     savingRef.current = true
     setSaving(true)
     setSaveError('')
-    setSaveStatus('Saving…')
+    setSaveStatus('Saving changes to PDF…')
 
     try {
-      const document = editor.getJSON()
-      if (!documentHasContent(document)) {
+      const documentJson = editor.getJSON()
+      if (!documentHasContent(documentJson)) {
         dirtyRef.current = false
         setDirty(false)
         setSaveStatus('Nothing to save yet')
         return null
       }
 
-      const blob = renderDocumentToPdf(document, {
-        title: reportTitle,
-        author: authorName,
-      })
-      const result = await savePdfFile(reportId, blob)
+      const changes = extractChangesFromEditor(documentJson)
+
+      if (changes.length === 0) {
+        dirtyRef.current = false
+        setDirty(false)
+        setSaveStatus('No text changes detected')
+        return null
+      }
+
+      const result = await patchPdfFile(reportId, changes)
 
       setRevision(result.fileRevision)
       setReloadKey((value) => value + 1)
       dirtyRef.current = false
       setDirty(false)
       setLastSavedAt(result.savedAt)
-      setSaveStatus('Saved to the PDF file')
+      setSaveStatus(`Saved (${result.count} change${result.count === 1 ? '' : 's'} patched into original PDF)`)
       return result
     } catch (error) {
-      setSaveError(error?.response?.data?.message || error.message || 'Unable to save this PDF.')
+      console.error('Save PDF patch error:', error)
+      setSaveError(error?.response?.data?.message || error.message || 'Unable to save changes to the PDF.')
       setSaveStatus('Not saved')
       return null
     } finally {
       savingRef.current = false
       setSaving(false)
     }
-  }, [authorName, canWrite, editor, reportId, reportTitle])
+  }, [canWrite, editor, extractChangesFromEditor, reportId])
 
   useEffect(() => {
     if (!canWrite) return undefined
@@ -467,9 +538,9 @@ const PdfWorkspaceSession = ({ workspace, reportId, currentUser, onCommentsChang
             </div>
             <div className="pdfw-toolbar-group is-right">
               <div className="pdfw-view-switch">
-                <button type="button" className={view === 'split' ? 'is-active' : ''} onClick={() => setView('split')} title="PDF and text side by side"><Columns size={13} /></button>
-                <button type="button" className={view === 'pdf' ? 'is-active' : ''} onClick={() => setView('pdf')} title="The PDF only"><Eye size={13} /></button>
-                <button type="button" className={view === 'document' ? 'is-active' : ''} onClick={() => setView('document')} title="The editable text only"><PenLine size={13} /></button>
+                <button type="button" className={view === 'document' ? 'is-active' : ''} onClick={() => setView('document')} title="Edit document canvas directly"><PenLine size={13} /> Edit Document</button>
+                <button type="button" className={view === 'pdf' ? 'is-active' : ''} onClick={() => setView('pdf')} title="The PDF file preview"><Eye size={13} /> PDF Preview</button>
+                <button type="button" className={view === 'split' ? 'is-active' : ''} onClick={() => setView('split')} title="PDF and text side by side"><Columns size={13} /> Split View</button>
               </div>
               <button
                 type="button"
@@ -735,3 +806,4 @@ const PdfWorkspace = () => {
 }
 
 export default PdfWorkspace
+

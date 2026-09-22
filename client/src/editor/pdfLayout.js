@@ -49,7 +49,7 @@ const blockStyle = (attrs) => [
   `width:${points(attrs.width, 240)}pt`,
   `font-size:${points(attrs.fontSize, 11)}pt`,
   `font-family:${fontStack(attrs.fontFamily, attrs.fontName)}`,
-  `line-height:${points(attrs.lineHeight, 1.3)}`,
+  `line-height:${points(attrs.lineHeight, 1.15)}`,
   `text-align:${['left', 'right', 'center', 'justify'].includes(attrs.align) ? attrs.align : 'left'}`,
   // A block is a column of text, not a paragraph with default margins: the
   // spacing in the file is already encoded in where the next block sits.
@@ -57,14 +57,24 @@ const blockStyle = (attrs) => [
   'padding:0',
   'white-space:pre-wrap',
   'overflow-wrap:break-word',
+  'box-sizing:border-box',
 ].join(';')
 
-const pageStyle = (attrs) => [
-  'position:relative',
-  `width:${points(attrs.width, 612)}pt`,
-  `height:${points(attrs.height, 792)}pt`,
-  'overflow:hidden',
-].join(';')
+const pageStyle = (attrs) => {
+  const styles = [
+    'position:relative',
+    `width:${points(attrs.width, 612)}pt`,
+    `height:${points(attrs.height, 792)}pt`,
+    'overflow:hidden',
+  ]
+  if (attrs?.backgroundImage) {
+    styles.push(`background-image:url("${attrs.backgroundImage}")`)
+    styles.push('background-size:100% 100%')
+    styles.push('background-repeat:no-repeat')
+    styles.push('background-position:center')
+  }
+  return styles.join(';')
+}
 
 /**
  * One sheet of the original document.
@@ -84,6 +94,9 @@ export const PdfPage = Node.create({
       width: { default: 612 },
       height: { default: 792 },
       page: { default: 1 },
+      reportId: { default: null },
+      revision: { default: null },
+      backgroundImage: { default: null },
     }
   },
 
@@ -113,20 +126,20 @@ export const PdfBlock = Node.create({
 
   addAttributes() {
     return {
+      id: { default: null },
       x: { default: 0 },
       y: { default: 0 },
       width: { default: 240 },
+      height: { default: 20 },
       fontSize: { default: 11 },
       fontFamily: { default: 'serif' },
       fontName: { default: null },
       align: { default: 'left' },
       lineHeight: { default: 1.3 },
-      // Distance from the block's top to its first baseline, as a fraction of the
-      // font size. The browser derives this from the font's own metrics; the
-      // exporter needs the number to put the baseline back where it was.
       ascent: { default: 0.8 },
       page: { default: 1 },
       heading: { default: 0 },
+      originalText: { default: '' },
     }
   },
 
@@ -140,6 +153,7 @@ export const PdfBlock = Node.create({
       'div',
       mergeAttributes(HTMLAttributes, {
         'data-pdf-block': 'true',
+        'data-pdf-block-id': node.attrs.id || undefined,
         'data-heading': heading ? String(heading) : undefined,
         class: heading ? `pdfw-block is-heading h${heading}` : 'pdfw-block',
         style: blockStyle(node.attrs),

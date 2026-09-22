@@ -19,7 +19,7 @@ import {
 import ThemeToggle from '../components/ThemeToggle'
 import { useAuth } from '../context/AuthContext'
 import { getStoredToken, clearStoredAuth } from '../utils/storage'
-import { getReportAnalysis } from '../services/plagiarismService'
+import { getReportAnalysis, requestAnalysis } from '../services/plagiarismService'
 import '../assets/css/dashboard.css'
 import '../assets/css/dashboard-components.css'
 
@@ -140,6 +140,7 @@ const ReportAnalysis = () => {
 
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [analyzing, setAnalyzing] = useState(false)
   const [error, setError] = useState('')
 
   const roles = Array.isArray(user?.roles) && user.roles.length ? user.roles : [user?.role]
@@ -167,6 +168,19 @@ const ReportAnalysis = () => {
       setLoading(false)
     }
   }, [reportId, navigate])
+
+  const handleRunAnalysis = async () => {
+    setAnalyzing(true)
+    setError('')
+    try {
+      await requestAnalysis(reportId, 'internal')
+      await load()
+    } catch (err) {
+      setError(err.message || 'Failed to run plagiarism analysis')
+    } finally {
+      setAnalyzing(false)
+    }
+  }
 
   useEffect(() => {
     if (!getStoredToken()) {
@@ -214,6 +228,16 @@ const ReportAnalysis = () => {
           <div className="mb-6 flex items-center justify-end gap-2">
             <button
               type="button"
+              onClick={handleRunAnalysis}
+              disabled={analyzing}
+              className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold text-white transition cursor-pointer disabled:opacity-50"
+              style={{ background: 'linear-gradient(to right, #ff7a00, #ff9500)' }}
+            >
+              {analyzing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <FileSearch className="h-3.5 w-3.5" />}
+              {analyzing ? 'Analyzing...' : 'Run Plagiarism Analysis'}
+            </button>
+            <button
+              type="button"
               onClick={load}
               className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium"
               style={{ borderColor: 'var(--line)', color: 'var(--text-soft)' }}
@@ -245,8 +269,18 @@ const ReportAnalysis = () => {
               <p className="mt-2 max-w-md text-sm">
                 {history.length
                   ? 'Previous attempts are listed below. None has completed successfully.'
-                  : 'No similarity analysis has been run for this report.'}
+                  : 'No similarity analysis has been run for this report yet.'}
               </p>
+              <button
+                type="button"
+                onClick={handleRunAnalysis}
+                disabled={analyzing}
+                className="mt-4 inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-xs font-semibold text-white transition cursor-pointer disabled:opacity-50"
+                style={{ background: 'linear-gradient(to right, #ff7a00, #ff9500)' }}
+              >
+                {analyzing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FileSearch className="h-4 w-4" />}
+                {analyzing ? 'Running Plagiarism Analysis...' : 'Run Plagiarism Analysis'}
+              </button>
             </div>
           ) : (
             <div className="space-y-5">

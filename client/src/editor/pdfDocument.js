@@ -397,6 +397,23 @@ const renderPageFaithfulToPdf = (document, options = {}) => {
     }
     firstPage = false
 
+    if (page.attrs?.backgroundImage) {
+      try {
+        doc.addImage(
+          page.attrs.backgroundImage,
+          'PNG',
+          0,
+          0,
+          pageWidth,
+          pageHeight,
+          undefined,
+          'FAST',
+        )
+      } catch {
+        // A background image jsPDF cannot decode must not prevent page text rendering.
+      }
+    }
+
     for (const node of page.content || []) {
       const attrs = node.attrs || {}
 

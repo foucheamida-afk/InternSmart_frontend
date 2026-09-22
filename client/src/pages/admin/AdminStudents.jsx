@@ -54,9 +54,6 @@ const REQUIRED_COLUMNS = [
   'class',
   'academic_supervisor_name',
   'academic_supervisor_email',
-  'professional_supervisor_name',
-  'professional_supervisor_email',
-  'company',
 ]
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -95,14 +92,14 @@ const validateCSVData = (headers, rows) => {
        errors.push('Invalid supervisor email format')
      }
 
-     if (!row.professional_supervisor_name) errors.push('Missing professional supervisor name')
-     if (!row.professional_supervisor_email) {
-       errors.push('Missing professional supervisor email')
-     } else if (!EMAIL_RE.test(row.professional_supervisor_email)) {
-       errors.push('Invalid professional supervisor email format')
-     }
+    //  if (!row.professional_supervisor_name) errors.push('Missing professional supervisor name')
+    //  if (!row.professional_supervisor_email) {
+    //    errors.push('Missing professional supervisor email')
+    //  } else if (!EMAIL_RE.test(row.professional_supervisor_email)) {
+    //    errors.push('Invalid professional supervisor email format')
+    //  }
 
-     if (!row.company) errors.push('Missing company')
+    //  if (!row.company) errors.push('Missing company')
 
     if (email) seenEmails.add(email)
     if (row.student_matricule) seenMatricules.add(row.student_matricule)
@@ -276,8 +273,6 @@ export default function AdminStudents() {
     { key: 'student_matricule',          label: 'Matricule' },
     { key: 'class',                      label: 'Class' },
     { key: 'academic_supervisor_name',   label: 'Academic Supervisor' },
-    { key: 'professional_supervisor_name', label: 'Professional Supervisor' },
-    { key: 'company',                    label: 'Company' },
   ]
 
   /* ────────────────────────────────────────

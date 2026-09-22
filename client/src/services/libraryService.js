@@ -59,6 +59,9 @@ export const openLibraryReport = (id) => request(`/library/reports/${id}/preview
 export const setLibraryVisibility = (id, visibility) =>
   request(`/library/reports/${id}/visibility`, { method: "PUT", body: { visibility } });
 
+export const deleteLibraryEntry = (id) =>
+  request(`/library/reports/${id}`, { method: "DELETE" });
+
 // Abstract and keywords are author-supplied: they are what make the library
 // searchable, and nothing can derive them from the file.
 export const setLibraryDetails = (id, details) =>
@@ -70,4 +73,5 @@ export default {
   getLibraryEntry,
   openLibraryReport,
   setLibraryVisibility,
+  deleteLibraryEntry,
 };

@@ -332,7 +332,7 @@ const Settings = () => {
                             type="text"
                             value={internshipForm.professionalSupervisorName}
                             onChange={(e) => setInternshipForm((prev) => ({ ...prev, professionalSupervisorName: e.target.value }))}
-                            placeholder="e.g. Jane Doe"
+                            placeholder="e.g. Grace Ngoum"
                             className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
                             style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)', color: 'var(--text)' }}
                           />
