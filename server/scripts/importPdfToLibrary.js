@@ -128,7 +128,6 @@ async function importDocument() {
       fileName: originalFilename,
       fileUrl: `/uploads/${storedFileName}`,
       fileHash: `hash-${report.id}`,
-      extractedText: plainText,
     });
 
     await report.update({
@@ -156,7 +155,7 @@ async function importDocument() {
     });
 
     // Index text shingles for internal plagiarism comparisons
-    await ensureIndexed(entry);
+    const index = await ensureIndexed(entry);
 
     console.log("\n=======================================================");
     console.log("DOCUMENT SUCCESSFULLY IMPORTED INTO VIRTUAL LIBRARY!");
@@ -167,8 +166,8 @@ async function importDocument() {
     console.log(`Library Entry ID : ${entry.id}`);
     console.log(`Title            : ${entry.title}`);
     console.log(`Academic Year    : ${entry.academicYear}`);
-    console.log(`Extracted Words  : ${entry.corpusWordCount || 0}`);
-    console.log(`Indexed Shingles : ${entry.corpusShingles?.length || 0}`);
+    console.log(`Extracted Words  : ${index?.corpusWordCount || 0}`);
+    console.log(`Indexed Shingles : ${index?.corpusShingles?.length || 0}`);
     console.log("=======================================================");
     console.log("\nThis document is now in the library database and ready for plagiarism comparisons!\n");
 

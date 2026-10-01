@@ -32,7 +32,7 @@ const anyAuthenticatedRole = authorize(
 // the others cannot. Never returns credentials.
 router.get("/providers", protect, authorize("admin"), getProviders);
 
-router.post("/reports/:reportId/analyze", protect, anyAuthenticatedRole, requestReportAnalysis);
+router.post("/reports/:reportId/analyze", protect, authorize("academic_supervisor"), requestReportAnalysis);
 router.get("/reports/:reportId/latest", protect, anyAuthenticatedRole, getReportAnalysis);
 router.get("/jobs/:jobId", protect, anyAuthenticatedRole, getAnalysisJob);
 

@@ -99,6 +99,7 @@ const PlagiarismAnalysis = sequelize.define(
 
     requestedBy: { type: DataTypes.INTEGER, allowNull: true },
 
+    nextAttemptAt: { type: DataTypes.DATE, allowNull: true },
     startedAt: { type: DataTypes.DATE, allowNull: true },
     completedAt: { type: DataTypes.DATE, allowNull: true },
   },

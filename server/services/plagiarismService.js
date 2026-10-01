@@ -88,8 +88,16 @@ export const requestAnalysis = async ({ report, requestedBy = null, providerName
 // after that the row is failed with the reason, which is what a supervisor needs
 // to see rather than an analysis that silently never completes.
 export const processQueuedAnalyses = async ({ limit = 5 } = {}) => {
+  const now = new Date();
   const queued = await PlagiarismAnalysis.findAll({
-    where: { status: "queued", attemptCount: { [Op.lt]: MAX_ATTEMPTS } },
+    where: {
+      status: "queued",
+      attemptCount: { [Op.lt]: MAX_ATTEMPTS },
+      [Op.or]: [
+        { nextAttemptAt: null },
+        { nextAttemptAt: { [Op.lte]: now } },
+      ],
+    },
     order: [["id", "ASC"]],
     limit,
   });
@@ -111,11 +119,25 @@ export const processQueuedAnalyses = async ({ limit = 5 } = {}) => {
       continue;
     }
 
-    await analysis.update({
-      status: "submitted",
-      attemptCount: attempts,
-      startedAt: analysis.startedAt || new Date(),
-    });
+    // Atomic claim lock: ensures only ONE worker process can own this job
+    const [claimed] = await PlagiarismAnalysis.update(
+      {
+        status: "submitted",
+        attemptCount: attempts,
+        startedAt: analysis.startedAt || new Date(),
+      },
+      {
+        where: {
+          id: analysis.id,
+          status: "queued",
+        },
+      }
+    );
+
+    if (claimed === 0) {
+      // Race condition handled: another worker thread/process claimed this row first
+      continue;
+    }
 
     try {
       const version = await ReportVersion.findByPk(analysis.reportVersionId);
@@ -126,10 +148,6 @@ export const processQueuedAnalyses = async ({ limit = 5 } = {}) => {
       });
 
       if (submission?.completed) {
-        // A synchronous provider (the internal engine) has already finished, so
-        // there is nothing to wait for and no webhook will arrive. Applying the
-        // outcome through the same path the webhook uses keeps one definition of
-        // "completed" rather than two.
         await applyOutcome(analysis, submission.completed);
         results.push({ id: analysis.id, outcome: "completed-synchronously" });
         continue;
@@ -143,12 +161,18 @@ export const processQueuedAnalyses = async ({ limit = 5 } = {}) => {
       results.push({ id: analysis.id, outcome: "submitted", externalScanId: submission?.externalScanId ?? null });
     } catch (error) {
       const exhausted = attempts >= MAX_ATTEMPTS;
+      // Exponential backoff: Attempt 1 = 30s delay, Attempt 2 = 120s (2m) delay
+      const backoffDelaysMs = [30000, 120000, 300000];
+      const delayMs = backoffDelaysMs[Math.min(attempts - 1, backoffDelaysMs.length - 1)];
+      const nextAttemptAt = exhausted ? null : new Date(Date.now() + delayMs);
+
       await analysis.update({
         status: exhausted ? "failed" : "queued",
         errorMessage: error.message,
+        nextAttemptAt,
         completedAt: exhausted ? new Date() : null,
       });
-      console.warn(`PLAGIARISM SUBMIT FAILED (analysis ${analysis.id}):`, error.message);
+      console.warn(`PLAGIARISM SUBMIT FAILED (analysis ${analysis.id}, attempt ${attempts}/${MAX_ATTEMPTS}):`, error.message);
       results.push({ id: analysis.id, outcome: "error", message: error.message });
     }
   }

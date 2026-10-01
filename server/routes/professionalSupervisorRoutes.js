@@ -6,6 +6,7 @@ import {
   getTasks,
   createTask,
   updateTask,
+  reviewTaskSubmission,
   deleteTask,
   submitTaskFeedback,
   getStats,
@@ -27,6 +28,7 @@ router.get("/my-interns", protect, authorize("professional_supervisor"), getMyIn
 router.get("/tasks", protect, authorize("professional_supervisor"), getTasks);
 router.post("/tasks", protect, authorize("professional_supervisor"), createTask);
 router.put("/tasks/:id", protect, authorize("professional_supervisor"), updateTask);
+router.put("/tasks/:id/review", protect, authorize("professional_supervisor"), reviewTaskSubmission);
 router.delete("/tasks/:id", protect, authorize("professional_supervisor"), deleteTask);
 router.put("/tasks/:id/feedback", protect, authorize("professional_supervisor"), submitTaskFeedback);
 

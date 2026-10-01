@@ -40,8 +40,8 @@ export const runWorkerTick = async () => {
 export const startPlagiarismWorker = () => {
   if (timer) return timer;
 
-  if (String(process.env.PLAGIARISM_WORKER_ENABLED ?? "true").toLowerCase() === "false") {
-    console.log("Plagiarism worker disabled (PLAGIARISM_WORKER_ENABLED=false).");
+  if (String(process.env.PLAGIARISM_WORKER_ENABLED ?? "false").toLowerCase() !== "true") {
+    console.log("Plagiarism worker interval polling disabled (runs on demand when analysis button is clicked).");
     return null;
   }
 

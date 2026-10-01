@@ -166,39 +166,6 @@ const LibraryEntry = sequelize.define(
       allowNull: true,
     },
 
-    // --- corpus fingerprint (phase 4) ---------------------------------------
-    // Computed from the report's text so the internal similarity engine can
-    // compare a new report against this one.
-    //
-    // `corpusSignature` is the MinHash signature used to screen candidates
-    // cheaply; `corpusShingles` is the exact shingle set, loaded only for the
-    // few candidates that survive screening, so the number shown to a supervisor
-    // is an exact overlap rather than an estimate. Both are null until the entry
-    // has been indexed, which the engine does lazily.
-    corpusSignature: {
-      type: DataTypes.JSON,
-      allowNull: true,
-    },
-
-    corpusShingles: {
-      type: DataTypes.JSON,
-      allowNull: true,
-    },
-
-    corpusWordCount: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-    },
-
-    corpusAlgorithmVersion: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
-
-    corpusIndexedAt: {
-      type: DataTypes.DATE,
-      allowNull: true,
-    },
   },
   {
     indexes: [

@@ -51,14 +51,23 @@ export const getDashboardStats = async (req, res) => {
     const [totalStudents, totalSupervisors, totalInternships, reportCounts, upcomingMeetings, defenseAlerts] =
       await Promise.all([
         Student.count({
-          include: [{ model: User, as: "user", where: { email: { [Op.notLike]: "%@example.invalid" } } }],
+          include: [{ model: User, as: "user", where: { email: { [Op.notLike]: "%.invalid" } } }],
         }),
         User.count({
           where: {
             role: "academic_supervisor",
           },
         }),
-        Internship.count(),
+        Internship.count({
+          include: [
+            {
+              model: Student,
+              as: "student",
+              required: true,
+              include: [{ model: User, as: "user", where: { email: { [Op.notLike]: "%.invalid" } } }],
+            },
+          ],
+        }),
         Report.findOne({
           attributes: [
             [
@@ -133,11 +142,13 @@ export const getChartData = async (req, res) => {
 
     if (metric === "internships") {
       const rows = await sequelize.query(
-        `SELECT DATE(createdAt) as date, COUNT(id) as count 
-         FROM Internships 
-         WHERE createdAt >= :startDate 
-         GROUP BY DATE(createdAt) 
-         ORDER BY DATE(createdAt) ASC`,
+        `SELECT DATE(i.createdAt) as date, COUNT(i.id) as count 
+         FROM Internships i
+         JOIN Students s ON i.studentId = s.id
+         JOIN Users u ON s.userId = u.id
+         WHERE i.createdAt >= :startDate AND u.email NOT LIKE '%.invalid'
+         GROUP BY DATE(i.createdAt) 
+         ORDER BY DATE(i.createdAt) ASC`,
         { replacements: { startDate: formattedDate }, type: "SELECT" }
       );
       return res.status(200).json({ metric: "internships", data: rows });
@@ -147,7 +158,7 @@ export const getChartData = async (req, res) => {
       const rows = await sequelize.query(
         `SELECT DATE(createdAt) as date, COUNT(id) as count 
          FROM Users 
-         WHERE createdAt >= :startDate 
+         WHERE createdAt >= :startDate AND email NOT LIKE '%.invalid'
          GROUP BY DATE(createdAt) 
          ORDER BY DATE(createdAt) ASC`,
         { replacements: { startDate: formattedDate }, type: "SELECT" }
@@ -184,7 +195,7 @@ export const getAllUsers = async (req, res) => {
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     const where = {
-      email: { [Op.notLike]: "%@example.invalid" },
+      email: { [Op.notLike]: "%.invalid" },
     };
     if (search) {
       where[Op.and] = [
@@ -352,6 +363,12 @@ export const deleteUser = async (req, res) => {
     const user = await User.findByPk(id);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
+    }
+
+    if (user.active) {
+      return res.status(400).json({
+        message: "User must be deactivated before deletion. Please deactivate the user first.",
+      });
     }
 
     // All cleanup runs in a single transaction. Previously each statement
@@ -647,13 +664,15 @@ export const importCSV = async (req, res) => {
           transaction: t,
         });
 
-        // const professionalSupervisor = await resolveSupervisor({
-        //   email: row.professional_supervisor_email,
-        //   name: row.professional_supervisor_name,
-        //   role: "professional_supervisor",
-        //   rowNumber: i + 1,
-        //   transaction: t,
-        // });
+        const professionalSupervisor = row.professional_supervisor_email
+          ? await resolveSupervisor({
+              email: row.professional_supervisor_email,
+              name: row.professional_supervisor_name,
+              role: "professional_supervisor",
+              rowNumber: i + 1,
+              transaction: t,
+            })
+          : null;
 
         const temporaryPassword = generateTemporaryPassword();
         const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
@@ -821,6 +840,8 @@ export const createUser = async (req, res) => {
           password: hashedPassword,
           role,
           mustChangePassword: true,
+          active: true,
+          status: "logged_out",
         },
         { transaction: t }
       );
@@ -946,7 +967,7 @@ export const getAllStudents = async (req, res) => {
         {
           model: User,
           as: "user",
-          where: { email: { [Op.notLike]: "%@example.invalid" } },
+          where: { email: { [Op.notLike]: "%.invalid" } },
           attributes: ["id", "name", "email", "role"],
           required: true,
         },
@@ -1059,7 +1080,7 @@ export const getAllInternships = async (req, res) => {
             {
               model: User,
               as: "user",
-              where: { email: { [Op.notLike]: "%@example.invalid" } },
+              where: { email: { [Op.notLike]: "%.invalid" } },
               attributes: ["id", "name", "email"],
               required: true,
             },
@@ -1163,6 +1184,25 @@ export const getAllReports = async (req, res) => {
 
     const { count, rows: reports } = await Report.findAndCountAll({
       where,
+      attributes: [
+        "id",
+        "studentId",
+        "title",
+        "fileName",
+        "fileUrl",
+        "version",
+        "status",
+        "progress",
+        "aiScore",
+        "aiAnalysis",
+        "submittedAt",
+        "updatedAt",
+        "currentVersionId",
+        "reviewCycle",
+        "submissionRequestedAt",
+        "finalSubmittedAt",
+        "lockedAt",
+      ],
       include: [
         {
           model: Student,
@@ -1172,7 +1212,7 @@ export const getAllReports = async (req, res) => {
             {
               model: User,
               as: "user",
-              where: { email: { [Op.notLike]: "%@example.invalid" } },
+              where: { email: { [Op.notLike]: "%.invalid" } },
               attributes: ["id", "name", "email"],
               required: true,
             },

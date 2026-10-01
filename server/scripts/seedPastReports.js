@@ -183,7 +183,6 @@ async function seedPastReports() {
         fileName: report.fileName,
         fileUrl: report.fileUrl,
         fileHash: `hash-${report.id}-${Date.now()}`,
-        extractedText: data.paragraphs.join("\n\n"),
       });
 
       await report.update({

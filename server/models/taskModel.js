@@ -15,6 +15,14 @@ const Task = sequelize.define("Task", {
     type: DataTypes.INTEGER,
     allowNull: false,
   },
+  supervisorRole: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  milestones: {
+    type: DataTypes.JSON,
+    allowNull: true,
+  },
   title: {
     type: DataTypes.STRING,
     allowNull: false,

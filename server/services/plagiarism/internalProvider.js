@@ -2,45 +2,31 @@ import { Op } from "sequelize";
 import LibraryEntry from "../../models/libraryEntryModel.js";
 import Report from "../../models/reportModel.js";
 import ReportVersion from "../../models/reportVersionModel.js";
+import ReportPlagiarismIndex from "../../models/reportPlagiarismIndexModel.js";
 import extractPdfText from "../../utils/extractPdfText.js";
 import { absolutePathFor } from "../../utils/uploadPath.js";
 import {
   ALGORITHM_VERSION,
-  estimateSimilarity,
-  exactSimilarity,
-  excerptAround,
   fingerprintText,
   plainTextFromDocumentTree,
   tokenize,
 } from "../../utils/textFingerprint.js";
 import { stripExcludedSections } from "../../utils/textExclusions.js";
 import { classifySimilarity } from "../../utils/similarityThresholds.js";
+import { runPlagiarismWorkerTask } from "./workerRunner.js";
 
 // Internal similarity engine: compare a report against the virtual library.
 //
-// This is the half of the module that addresses the actual problem - students
-// reusing reports from earlier cohorts. The external provider finds material
-// copied from the web; only the internal engine can find a report copied from a
-// previous student at the same institution.
+// Offloaded to Node.js Worker Threads (`workerRunner.js`) to keep heavy MinHash
+// screening and 5-word shingle comparisons off the main Express event loop.
 //
-// Synchronous, unlike Copyleaks: there is no network call and the corpus is a
-// local table, so the analysis completes inside the worker tick and needs no
-// webhook. The provider contract allows that by returning a completed outcome
-// from `submit`.
+// Uses projection and batch queries to avoid loading `corpusShingles` (up to 205KB)
+// for candidates that fail the initial MinHash signature screening pass.
 
-// Shingle sets of a few hundred reports are cheap to compare, so screening is
-// generous and the exact pass decides.
 const SCREEN_FLOOR = Number(process.env.PLAGIARISM_INTERNAL_SCREEN_FLOOR) || 0.06;
-
-// How many screened candidates get the expensive exact comparison.
 const MAX_CANDIDATES = Number(process.env.PLAGIARISM_INTERNAL_MAX_CANDIDATES) || 25;
-
-// A pair below this contributes no match row: on a corpus of student reports,
-// boilerplate covers, contents pages and standard methodology headings produce
-// small overlaps in almost every pair.
 const MATCH_FLOOR = Number(process.env.PLAGIARISM_INTERNAL_MATCH_FLOOR) || 0.03;
 
-// The engine is always available: it needs no credentials and no network.
 const isConfigured = () => true;
 
 const describe = () => ({
@@ -48,79 +34,100 @@ const describe = () => ({
   configured: true,
   asynchronous: false,
   notes:
-    "Compares a report against the archived reports in the virtual library using 5-word shingles and a MinHash signature. Runs locally; no credentials or network required.",
+    "Compares a report against archived reports in the virtual library using 5-word shingles and MinHash signature screening in a background worker thread.",
 });
 
 // Plain text for a report version.
-//
-// Prefers the editor tree the upload path already extracted, because it is
-// already in the database and re-parsing the PDF is wasted work. Falls back to
-// reading the stored file when the tree is absent, and caches the result on the
-// version row so a re-analysis does not repeat it.
 const textForVersion = async (version) => {
   if (!version) return "";
 
-  if (version.extractedText) return version.extractedText;
-
-  const report = await Report.findByPk(version.reportId);
+  const report = await Report.findByPk(version.reportId, {
+    attributes: ["id", "documentContent"],
+  });
   const fromTree = plainTextFromDocumentTree(report?.documentContent);
   if (fromTree) {
-    await version.update({ extractedText: fromTree });
     return fromTree;
   }
 
-  const tree = await extractPdfText(absolutePathFor(version.fileUrl));
-  const fromFile = plainTextFromDocumentTree(tree);
-  if (fromFile) {
-    await version.update({ extractedText: fromFile });
-    return fromFile;
+  try {
+    const tree = await extractPdfText(absolutePathFor(version.fileUrl));
+    const fromFile = plainTextFromDocumentTree(tree);
+    if (fromFile) {
+      return fromFile;
+    }
+  } catch (err) {
+    console.warn(`textForVersion: text extraction error for version ${version.id}:`, err.message);
   }
 
   return "";
 };
 
 // Fingerprint a library entry that has not been indexed yet.
-//
-// Lazy rather than done at archive time so that entries archived before this
-// phase existed become comparable the first time anything is compared against
-// them - no separate migration step and no admin action required.
 const ensureIndexed = async (entry) => {
-  if (entry.corpusSignature && entry.corpusAlgorithmVersion === ALGORITHM_VERSION) {
-    return entry;
+  let index = await ReportPlagiarismIndex.findOne({
+    where: { reportVersionId: entry.reportVersionId },
+    attributes: ["id", "reportVersionId", "libraryEntryId", "corpusSignature", "corpusWordCount", "algorithmVersion"],
+  }).catch(async () => {
+    await ReportPlagiarismIndex.sync();
+    return ReportPlagiarismIndex.findOne({
+      where: { reportVersionId: entry.reportVersionId },
+      attributes: ["id", "reportVersionId", "libraryEntryId", "corpusSignature", "corpusWordCount", "algorithmVersion"],
+    });
+  });
+
+  if (index && index.corpusSignature && index.algorithmVersion === ALGORITHM_VERSION) {
+    return index;
   }
 
   const version = await ReportVersion.findByPk(entry.reportVersionId);
   const text = await textForVersion(version);
-  // Same exclusion rules as the query side: an asymmetric comparison would
-  // compare a filtered report against an unfiltered one and misreport the gap.
   const fingerprint = fingerprintText(stripExcludedSections(text).text);
 
   if (!fingerprint.comparable) {
-    // Record the attempt so it is not retried on every analysis, but leave the
-    // signature null so the entry is excluded from comparison rather than
-    // treated as an empty document (which would score 0 and look "clean").
-    await entry.update({
-      corpusWordCount: fingerprint.wordCount,
-      corpusAlgorithmVersion: ALGORITHM_VERSION,
-      corpusIndexedAt: new Date(),
-    });
-    return entry;
+    if (index) {
+      await index.update({
+        libraryEntryId: entry.id,
+        corpusWordCount: fingerprint.wordCount,
+        algorithmVersion: ALGORITHM_VERSION,
+        indexedAt: new Date(),
+      });
+    } else {
+      index = await ReportPlagiarismIndex.create({
+        reportVersionId: entry.reportVersionId,
+        libraryEntryId: entry.id,
+        corpusWordCount: fingerprint.wordCount,
+        algorithmVersion: ALGORITHM_VERSION,
+        indexedAt: new Date(),
+      });
+    }
+    return index;
   }
 
-  await entry.update({
-    corpusSignature: fingerprint.signature,
-    corpusShingles: fingerprint.shingles,
-    corpusWordCount: fingerprint.wordCount,
-    corpusAlgorithmVersion: ALGORITHM_VERSION,
-    corpusIndexedAt: new Date(),
-  });
+  if (index) {
+    await index.update({
+      libraryEntryId: entry.id,
+      corpusSignature: fingerprint.signature,
+      corpusShingles: fingerprint.shingles,
+      corpusWordCount: fingerprint.wordCount,
+      algorithmVersion: ALGORITHM_VERSION,
+      indexedAt: new Date(),
+    });
+  } else {
+    index = await ReportPlagiarismIndex.create({
+      reportVersionId: entry.reportVersionId,
+      libraryEntryId: entry.id,
+      corpusSignature: fingerprint.signature,
+      corpusShingles: fingerprint.shingles,
+      corpusWordCount: fingerprint.wordCount,
+      algorithmVersion: ALGORITHM_VERSION,
+      indexedAt: new Date(),
+    });
+  }
 
-  return entry;
+  return index;
 };
 
-// Submit = run the comparison.
-//
-// Returns an already-completed outcome, which the caller applies immediately.
+// Submit = run the comparison via batch queries and Worker Thread offloading.
 const submit = async ({ analysis, version }) => {
   const text = await textForVersion(version);
 
@@ -130,9 +137,6 @@ const submit = async ({ analysis, version }) => {
     );
   }
 
-  // Exclusion rules run before fingerprinting, so excluded material contributes
-  // nothing to either side of the comparison. Post-filtering matches instead
-  // would still let a fifty-entry reference list dominate the score.
   const exclusions = stripExcludedSections(text);
   const query = fingerprintText(exclusions.text);
 
@@ -142,69 +146,146 @@ const submit = async ({ analysis, version }) => {
     );
   }
 
-  // Every archived report except this one. Cross-year comparison is the whole
-  // point, so the academic year is reported on each match rather than used to
-  // filter candidates out.
+  // Step 1: Batch fetch candidate metadata
   const candidates = await LibraryEntry.findAll({
     where: { reportVersionId: { [Op.ne]: version.id } },
+    attributes: ["id", "reportId", "reportVersionId", "academicYear", "title", "submissionDate"],
     order: [["submissionDate", "DESC"]],
   });
 
-  const screened = [];
+  if (!candidates.length) {
+    return {
+      externalScanId: null,
+      completed: {
+        status: "completed",
+        internalScore: 0,
+        plagiarismStatus: classifySimilarity(0),
+        excludedSections: exclusions.removedSections,
+        totalWords: query.wordCount,
+        matchedWords: 0,
+        rawSummary: {
+          algorithmVersion: ALGORITHM_VERSION,
+          corpusSize: 0,
+          screened: 0,
+          shortlisted: 0,
+          reportedMatches: 0,
+          excludedSections: exclusions.removedSections,
+          excludedCharacters: exclusions.removedCharacters,
+        },
+        matches: [],
+        message: "Compared against 0 archived report(s); no overlap above 3%.",
+      },
+    };
+  }
 
+  // Step 2: Batch fetch candidate indices WITHOUT corpusShingles (eliminates N+1 queries)
+  const candidateVersionIds = candidates.map((c) => c.reportVersionId);
+  const existingIndexes = await ReportPlagiarismIndex.findAll({
+    where: { reportVersionId: candidateVersionIds },
+    attributes: ["id", "reportVersionId", "libraryEntryId", "corpusSignature", "algorithmVersion"],
+  });
+
+  const indexByVersionId = new Map(existingIndexes.map((idx) => [idx.reportVersionId, idx]));
+
+  const candidatePayloads = [];
   for (const entry of candidates) {
-    const indexed = await ensureIndexed(entry);
-    if (!indexed.corpusSignature) continue;
-
-    const estimate = estimateSimilarity(query.signature, indexed.corpusSignature);
-    if (estimate >= SCREEN_FLOOR) {
-      screened.push({ entry: indexed, estimate });
+    let idx = indexByVersionId.get(entry.reportVersionId);
+    if (!idx || !idx.corpusSignature || idx.algorithmVersion !== ALGORITHM_VERSION) {
+      idx = await ensureIndexed(entry);
+    }
+    if (idx && idx.corpusSignature) {
+      candidatePayloads.push({
+        reportVersionId: entry.reportVersionId,
+        libraryEntryId: entry.id,
+        entry: {
+          id: entry.id,
+          reportId: entry.reportId,
+          academicYear: entry.academicYear ?? null,
+          title: entry.title ?? null,
+        },
+        corpusSignature: idx.corpusSignature,
+      });
     }
   }
 
-  screened.sort((a, b) => b.estimate - a.estimate);
-  const shortlist = screened.slice(0, MAX_CANDIDATES);
+  // Step 3: Run candidate screening off the main thread in a Worker Thread
+  const screenResult = await runPlagiarismWorkerTask({
+    type: "SCREEN_CANDIDATES",
+    querySignature: query.signature,
+    candidates: candidatePayloads,
+    screenFloor: SCREEN_FLOOR,
+    maxCandidates: MAX_CANDIDATES,
+  });
 
-  const matches = [];
-  let topScore = 0;
+  const shortlisted = screenResult.shortlisted || [];
 
-  for (const { entry } of shortlist) {
-    const { score, shared, sharedCount } = exactSimilarity(query.shingles, entry.corpusShingles);
-    if (score < MATCH_FLOOR) continue;
-
-    if (score > topScore) topScore = score;
-
-    // A representative excerpt: the first shared shingle's window in the
-    // submitted report. The reviewer needs to recognise the reuse, not to read
-    // the whole passage again.
-    const firstShared = shared[0];
-    const startIndex = query.firstIndexByHash?.get(firstShared);
-    const excerpt = excerptAround(tokenize(exclusions.text), startIndex);
-
-    matches.push({
-      sourceType: "internal",
-      sourceReportId: entry.reportId,
-      sourceAcademicYear: entry.academicYear ?? null,
-      sourceTitle: entry.title ?? null,
-      matchedWords: Math.round(sharedCount * 5),
-      similarityPercentage: Math.round(score * 10000) / 100,
-      matchedText: excerpt,
-    });
+  if (!shortlisted.length) {
+    return {
+      externalScanId: null,
+      completed: {
+        status: "completed",
+        internalScore: 0,
+        plagiarismStatus: classifySimilarity(0),
+        excludedSections: exclusions.removedSections,
+        totalWords: query.wordCount,
+        matchedWords: 0,
+        rawSummary: {
+          algorithmVersion: ALGORITHM_VERSION,
+          corpusSize: candidates.length,
+          screened: screenResult.screenedCount || 0,
+          shortlisted: 0,
+          reportedMatches: 0,
+          excludedSections: exclusions.removedSections,
+          excludedCharacters: exclusions.removedCharacters,
+        },
+        matches: [],
+        message: `Compared against ${candidates.length} archived report(s); no overlap above ${Math.round(MATCH_FLOOR * 100)}%.`,
+      },
+    };
   }
 
-  matches.sort((a, b) => (b.similarityPercentage || 0) - (a.similarityPercentage || 0));
+  // Step 4: Batch fetch corpusShingles ONLY for shortlisted candidates
+  const shortlistVersionIds = shortlisted.map((c) => c.reportVersionId);
+  const shingleRows = await ReportPlagiarismIndex.findAll({
+    where: { reportVersionId: shortlistVersionIds },
+    attributes: ["reportVersionId", "corpusShingles"],
+  });
 
-  // The headline number is the single highest overlap, not a sum. Summing would
-  // exceed 100 % and would imply a total that no reviewer can act on.
-  const internalScore = matches.length ? matches[0].similarityPercentage : 0;
+  const shinglesByVersionId = new Map(shingleRows.map((row) => [row.reportVersionId, row.corpusShingles]));
+
+  const shortlistedWithShingles = shortlisted
+    .map((item) => ({
+      ...item,
+      corpusShingles: shinglesByVersionId.get(item.reportVersionId) || [],
+    }))
+    .filter((item) => Array.isArray(item.corpusShingles) && item.corpusShingles.length > 0);
+
+  // Convert firstIndexByHash Map to plain object for worker postMessage
+  const firstIndexMapObj = {};
+  if (query.firstIndexByHash) {
+    for (const [hash, idx] of query.firstIndexByHash.entries()) {
+      firstIndexMapObj[hash] = idx;
+    }
+  }
+
+  // Step 5: Run exact shingle comparisons off the main thread in a Worker Thread
+  const matchResult = await runPlagiarismWorkerTask({
+    type: "EXACT_MATCHES",
+    queryShingles: query.shingles,
+    shortlistedCandidates: shortlistedWithShingles,
+    queryTokens: tokenize(exclusions.text),
+    firstIndexMapObj,
+    matchFloor: MATCH_FLOOR,
+  });
+
+  const matches = matchResult.matches || [];
+  const internalScore = matchResult.internalScore || 0;
 
   return {
-    // No external scan, so nothing to correlate a webhook with.
     externalScanId: null,
     completed: {
       status: "completed",
       internalScore,
-      // A label for prioritising review, not a finding of misconduct.
       plagiarismStatus: classifySimilarity(internalScore),
       excludedSections: exclusions.removedSections,
       totalWords: query.wordCount,
@@ -212,8 +293,8 @@ const submit = async ({ analysis, version }) => {
       rawSummary: {
         algorithmVersion: ALGORITHM_VERSION,
         corpusSize: candidates.length,
-        screened: screened.length,
-        shortlisted: shortlist.length,
+        screened: screenResult.screenedCount || 0,
+        shortlisted: shortlisted.length,
         reportedMatches: matches.length,
         excludedSections: exclusions.removedSections,
         excludedCharacters: exclusions.removedCharacters,

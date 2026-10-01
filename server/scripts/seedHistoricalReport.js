@@ -84,7 +84,6 @@ async function seed() {
       fileName: report.fileName,
       fileUrl: report.fileUrl,
       fileHash: `hash-${report.id}`,
-      extractedText: SAMPLE_PARAGRAPHS.join("\n\n"),
     });
 
     await report.update({
@@ -111,7 +110,7 @@ async function seed() {
     });
 
     // 4. Index text fingerprint for internal plagiarism comparisons
-    await ensureIndexed(entry);
+    const index = await ensureIndexed(entry);
 
     console.log("\n=======================================================");
     console.log("HISTORICAL REPORT SUCCESSFULLY SEEDED INTO THE LIBRARY!");
@@ -120,7 +119,7 @@ async function seed() {
     console.log(`Report ID        : ${report.id}`);
     console.log(`Title            : ${entry.title}`);
     console.log(`Academic Year    : ${entry.academicYear}`);
-    console.log(`Shingles Indexed : ${entry.corpusShingles?.length || 0}`);
+    console.log(`Shingles Indexed : ${index?.corpusShingles?.length || 0}`);
     console.log("=======================================================");
     console.log("\nYou can now submit any new student report containing text from this report,");
     console.log("and run an internal plagiarism check to see a match against this entry!\n");

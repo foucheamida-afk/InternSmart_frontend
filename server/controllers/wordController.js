@@ -149,7 +149,10 @@ export const exportReportAsDocx = async (req, res) => {
       });
     }
 
-    const buffer = await editorContentToDocxBuffer(document, { title });
+    const header = req.body?.header ?? null;
+    const footer = req.body?.footer ?? null;
+
+    const buffer = await editorContentToDocxBuffer(document, { title, header, footer });
 
     res.setHeader("Content-Type", DOCX_MIME);
     res.setHeader("Content-Disposition", `attachment; filename="${cleanFileName(title)}.docx"`);

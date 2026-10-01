@@ -15,6 +15,7 @@ import ReportVersion from "../models/reportVersionModel.js";
 import LibraryEntry from "../models/libraryEntryModel.js";
 import PlagiarismAnalysis from "../models/plagiarismAnalysisModel.js";
 import PlagiarismMatch from "../models/plagiarismMatchModel.js";
+import ReportPlagiarismIndex from "../models/reportPlagiarismIndexModel.js";
 import Notification from "../models/notificationModel.js";
 
 const BASE = "http://localhost:3000/api";
@@ -84,6 +85,17 @@ const TREE = (paragraphs) => ({
 });
 
 const buildStudent = async (label) => {
+  const supervisorUser = await User.create({
+    name: `${label} Supervisor`,
+    email: mail(`${label}-sup`),
+    password: await bcrypt.hash(PASSWORD, 10),
+    role: "academic_supervisor",
+    mustChangePassword: false,
+    active: true,
+    onboardingCompletedAt: new Date(),
+  });
+  ids.users.push(supervisorUser.id);
+
   const user = await User.create({
     name: `${label} Student`,
     email: mail(label),
@@ -91,6 +103,7 @@ const buildStudent = async (label) => {
     role: "student",
     mustChangePassword: false,
     active: true,
+    onboardingCompletedAt: new Date(),
   });
   ids.users.push(user.id);
 
@@ -101,9 +114,16 @@ const buildStudent = async (label) => {
   });
   ids.students.push(student.id);
 
-  await Internship.create({ studentId: student.id, company: "Acme", academicYear: "2025/2026" });
+  await Internship.create({
+    studentId: student.id,
+    company: "Acme",
+    academicYear: "2025/2026",
+    academicSupervisorId: supervisorUser.id,
+  });
 
-  return { user, student, auth: auth(await login(user.email)) };
+  const supervisorToken = await login(supervisorUser.email);
+
+  return { user, student, auth: auth(await login(user.email)), supervisorAuth: auth(supervisorToken) };
 };
 
 // An archived report: a Report + version + library entry, with the text stored
@@ -159,7 +179,7 @@ try {
 
   // A genuinely unrelated report, so the engine is not merely finding the only
   // other document it has.
-  await archiveReport(
+  const unrelatedReport = await archiveReport(
     unrelated,
     "Agricultural Survey",
     [
@@ -182,7 +202,7 @@ try {
   // --- run the engine ------------------------------------------------------
   const request = await fetch(`${BASE}/plagiarism/reports/${submitted.report.id}/analyze`, {
     method: "POST",
-    headers: later.auth,
+    headers: later.supervisorAuth,
     body: JSON.stringify({ provider: "internal" }),
   });
   const requested = await request.json();
@@ -225,7 +245,7 @@ try {
   check("a matched-word count is reported", (earlierMatch?.matchedWords || 0) > 20, String(earlierMatch?.matchedWords));
   check("an excerpt is captured for the reviewer", (earlierMatch?.matchedText || "").length > 20, (earlierMatch?.matchedText || "").slice(0, 60));
 
-  const unrelatedMatch = matches.find((m) => m.sourceReportId !== archived.report.id);
+  const unrelatedMatch = matches.find((m) => m.sourceReportId === unrelatedReport.report.id);
   check(
     "the genuinely unrelated report is not reported as a match",
     !unrelatedMatch,
@@ -239,10 +259,10 @@ try {
   );
 
   // --- the corpus is indexed for reuse -------------------------------------
-  await archived.entry.reload();
-  check("the archived entry is fingerprinted for future comparisons", Array.isArray(archived.entry.corpusSignature) && archived.entry.corpusSignature.length === 128, `len=${archived.entry.corpusSignature?.length}`);
-  check("the exact shingle set is retained for confirmation", Array.isArray(archived.entry.corpusShingles) && archived.entry.corpusShingles.length > 20, `n=${archived.entry.corpusShingles?.length}`);
-  check("the algorithm version is recorded so a stale index is detectable", Boolean(archived.entry.corpusAlgorithmVersion), archived.entry.corpusAlgorithmVersion);
+  const archivedIndex = await ReportPlagiarismIndex.findOne({ where: { reportVersionId: archived.version.id } });
+  check("the archived entry is fingerprinted for future comparisons", Array.isArray(archivedIndex?.corpusSignature) && archivedIndex.corpusSignature.length === 128, `len=${archivedIndex?.corpusSignature?.length}`);
+  check("the exact shingle set is retained for confirmation", Array.isArray(archivedIndex?.corpusShingles) && archivedIndex.corpusShingles.length > 20, `n=${archivedIndex?.corpusShingles?.length}`);
+  check("the algorithm version is recorded so a stale index is detectable", Boolean(archivedIndex?.algorithmVersion), archivedIndex?.algorithmVersion);
 
   // --- reading it back over the API ----------------------------------------
   const latest = await (await fetch(`${BASE}/plagiarism/reports/${submitted.report.id}/latest`, { headers: later.auth })).json();
@@ -325,6 +345,11 @@ try {
   try {
     const reportIds = ids.reports.filter(Number.isInteger);
     if (reportIds.length) {
+      const versions = await ReportVersion.findAll({ where: { reportId: reportIds }, attributes: ["id"] });
+      const vIds = versions.map((v) => v.id);
+      if (vIds.length) {
+        await ReportPlagiarismIndex.destroy({ where: { reportVersionId: vIds } });
+      }
       const analyses = await PlagiarismAnalysis.findAll({ where: { reportId: reportIds }, attributes: ["id"] });
       await PlagiarismMatch.destroy({ where: { analysisId: analyses.map((a) => a.id) } });
       await PlagiarismAnalysis.destroy({ where: { reportId: reportIds } });

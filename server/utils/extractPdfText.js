@@ -4,7 +4,7 @@ import { PDFParse } from "pdf-parse";
 const extractPdfText = async (filePath) => {
   let parser = null;
   try {
-    const buffer = fs.readFileSync(filePath);
+    const buffer = await fs.promises.readFile(filePath);
     parser = new PDFParse({ data: buffer });
     const result = await parser.getText();
     const text = String(result.text || "").trim();

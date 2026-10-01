@@ -95,6 +95,10 @@ const Report = sequelize.define("Report", {
     type: DataTypes.JSON,
     allowNull: true,
   },
+  pdfOverlayData: {
+    type: DataTypes.JSON,
+    allowNull: true,
+  },
 
   // --- Submission workflow -------------------------------------------------
   // The file the workflow currently points at. `fileName`/`fileUrl` above are

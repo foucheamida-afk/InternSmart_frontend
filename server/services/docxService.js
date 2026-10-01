@@ -6,11 +6,14 @@ import {
   BorderStyle,
   Document,
   ExternalHyperlink,
+  Footer,
+  Header,
   HeadingLevel,
   ImageRun,
   LevelFormat,
   Packer,
   PageBreak,
+  PageNumber,
   Paragraph,
   Table,
   TableCell,
@@ -1194,13 +1197,83 @@ export const normalizeEditorContent = (value) => {
 };
 
 /** Editor content -> .docx bytes. */
-export const editorContentToDocxBuffer = async (value, { title } = {}) => {
+export const editorContentToDocxBuffer = async (value, { title, header, footer } = {}) => {
   const document = normalizeEditorContent(value);
   if (!document) throw new Error("There is no editor content to export.");
+
+  // Extract header/footer config from document JSON if present
+  const headerConfig = header || document.headerConfig || {};
+  const footerConfig = footer || document.footerConfig || {};
 
   const children = [];
   blockToDocx(document, {}, children);
   if (!children.length) children.push(new Paragraph(""));
+
+  const docHeaders = {};
+  if (headerConfig.enabled && headerConfig.text) {
+    const alignment = ALIGNMENTS[headerConfig.alignment] || AlignmentType.CENTER;
+    docHeaders.default = new Header({
+      children: [
+        new Paragraph({
+          alignment,
+          children: [
+            new TextRun({
+              text: headerConfig.text,
+              font: headerConfig.fontFamily || "Times New Roman",
+              size: toHalfPoints(headerConfig.fontSize) || 18,
+              italics: Boolean(headerConfig.italic),
+              bold: Boolean(headerConfig.bold),
+              color: "666666",
+            }),
+          ],
+          border: headerConfig.showSeparator
+            ? { bottom: { style: BorderStyle.SINGLE, size: 4, color: "CCCCCC", space: 4 } }
+            : undefined,
+        }),
+      ],
+    });
+  }
+
+  const docFooters = {};
+  if (footerConfig.enabled) {
+    const alignment = ALIGNMENTS[footerConfig.alignment] || AlignmentType.RIGHT;
+    const footerRuns = [];
+    if (footerConfig.text) {
+      footerRuns.push(
+        new TextRun({
+          text: `${footerConfig.text}   `,
+          font: footerConfig.fontFamily || "Times New Roman",
+          size: toHalfPoints(footerConfig.fontSize) || 18,
+          italics: Boolean(footerConfig.italic),
+          bold: Boolean(footerConfig.bold),
+          color: "666666",
+        })
+      );
+    }
+
+    if (footerConfig.pageNumbering?.enabled) {
+      footerRuns.push(
+        new TextRun({ text: "Page ", font: "Times New Roman", size: 18, color: "666666" }),
+        PageNumber.CURRENT,
+        new TextRun({ text: " of ", font: "Times New Roman", size: 18, color: "666666" }),
+        PageNumber.TOTAL_PAGES
+      );
+    }
+
+    if (footerRuns.length) {
+      docFooters.default = new Footer({
+        children: [
+          new Paragraph({
+            alignment,
+            children: footerRuns,
+            border: footerConfig.showSeparator
+              ? { top: { style: BorderStyle.SINGLE, size: 4, color: "CCCCCC", space: 4 } }
+              : undefined,
+          }),
+        ],
+      });
+    }
+  }
 
   const doc = new Document({
     creator: "InternSmart",
@@ -1251,6 +1324,8 @@ export const editorContentToDocxBuffer = async (value, { title } = {}) => {
         properties: {
           page: { margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 } },
         },
+        headers: docHeaders,
+        footers: docFooters,
         children,
       },
     ],

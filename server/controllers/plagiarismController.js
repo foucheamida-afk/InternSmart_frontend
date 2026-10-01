@@ -93,6 +93,13 @@ const fail = (res, error, label) => {
 // POST /api/plagiarism/reports/:reportId/analyze
 export const requestReportAnalysis = async (req, res) => {
   try {
+    const roles = req.effectiveRoles || [req.user?.role];
+    if (!roles.includes("academic_supervisor")) {
+      return res.status(403).json({
+        message: "Only the academic supervisor can analyze a report for plagiarism.",
+      });
+    }
+
     const target = await resolveTarget(req);
     if (target.error) return res.status(target.error.status).json({ message: target.error.message });
 
@@ -102,17 +109,18 @@ export const requestReportAnalysis = async (req, res) => {
       providerName: req.body?.provider || null,
     });
 
-    // Kick the worker immediately rather than waiting up to a full interval, so
-    // the scan is submitted as soon as it is requested. The call is
-    // fire-and-forget: the HTTP response must not wait on Copyleaks.
-    runWorkerTick().catch(() => {});
+    // Run the plagiarism engine worker tick immediately on button click
+    await runWorkerTick().catch((err) => console.error("Plagiarism tick error:", err));
 
-    return res.status(reused ? 200 : 202).json({
+    const updatedTarget = await resolveTarget(req);
+    const latestAnalysis = updatedTarget.latestAnalysis || analysis;
+
+    return res.status(200).json({
       message: reused
-        ? "An analysis of this version is already in progress."
-        : "Analysis queued. The result will appear here when the provider reports back.",
+        ? "An analysis of this version has already been completed."
+        : "Plagiarism analysis completed.",
       reused,
-      analysis: publicAnalysis(analysis),
+      analysis: publicAnalysis(latestAnalysis),
     });
   } catch (error) {
     return fail(res, error, "REQUEST REPORT ANALYSIS ERROR:");

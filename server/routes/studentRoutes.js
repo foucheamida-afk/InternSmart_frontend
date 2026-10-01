@@ -125,6 +125,28 @@ router.get("/my-supervisor-feedback", protect, studentOnly, getMySupervisorFeedb
 router.get("/my-meetings", protect, studentOnly, getMyMeetings);
 router.get("/my-notifications", protect, studentOnly, getMyNotifications);
 router.put("/notifications/:id/read", protect, studentOnly, markNotificationRead);
+const taskUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, callback) => callback(null, uploadDirectory),
+    filename: (_req, file, callback) => callback(null, `task-${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`),
+  }),
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
+});
+
+router.post("/tasks/upload", protect, studentOnly, taskUpload.single("file"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: "No file was uploaded." });
+  }
+  const protocol = req.protocol || "http";
+  const host = req.get("host") || "localhost:3000";
+  const fileUrl = `${protocol}://${host}/uploads/${req.file.filename}`;
+  return res.json({
+    message: "Deliverable uploaded successfully",
+    fileUrl,
+    filename: req.file.originalname,
+  });
+});
+
 router.get("/my-tasks", protect, studentOnly, getMyTasks);
 router.put("/tasks/:id/toggle", protect, studentOnly, toggleTaskComplete);
 router.put("/tasks/:id/progress", protect, studentOnly, updateTaskProgress);

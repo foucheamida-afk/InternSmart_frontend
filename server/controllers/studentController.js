@@ -9,7 +9,7 @@ import Notification from "../models/notificationModel.js";
 import Task from "../models/taskModel.js";
 import { Op } from "sequelize";
 import { extractDocumentContent, extractPlainText, isContentlessDocument } from "../utils/documentExtraction.js";
-import { REPORT_FILE_KIND, reportFileKind } from "../utils/documentTypes.js";
+import { REPORT_FILE_KIND, reportFileKind, isDocxFile } from "../utils/documentTypes.js";
 import { checkStorableDocumentContent, tooLargeMessage } from "../utils/storedContentLimit.js";
 import fs from "fs";
 import path from "path";
@@ -425,6 +425,25 @@ const getMyReports = async (req, res) => {
 
     const reports = await Report.findAll({
       where: { studentId: student.id },
+      attributes: [
+        "id",
+        "studentId",
+        "title",
+        "fileName",
+        "fileUrl",
+        "version",
+        "status",
+        "progress",
+        "aiScore",
+        "aiAnalysis",
+        "submittedAt",
+        "updatedAt",
+        "currentVersionId",
+        "reviewCycle",
+        "submissionRequestedAt",
+        "finalSubmittedAt",
+        "lockedAt",
+      ],
       order: [["submittedAt", "DESC"]],
     });
 
@@ -477,54 +496,10 @@ const submitReport = async (req, res) => {
     // can drift from the one being displayed. Only the name and the location are
     // kept for a PDF. (The similarity engine reads the file when it needs text;
     // see services/plagiarism/internalProvider.js.)
-    const uploadKind = reportFileKind({ fileType: req.file.mimetype, fileName: req.file.originalname });
-    const isPdfUpload = uploadKind === REPORT_FILE_KIND.PDF;
-
-    if (!isPdfUpload) {
-      // Dispatches on the file type: a .docx is read with mammoth into editor
-      // content.
-      try {
-        documentContent = await extractDocumentContent(filePath)
-      } catch {
-        documentContent = null
-      }
-    }
-
-    // A conversion that produced nothing is stored as *no content*, never as an
-    // empty document: an empty document is indistinguishable from a finished one,
-    // so it would stop the workspace from ever reading the file again. Leaving the
-    // column empty lets the next load retry, and the upload itself still stands.
-    if (documentContent && isContentlessDocument(documentContent)) {
-      console.warn(
-        `REPORT CONVERSION PRODUCED NO CONTENT: ${req.file.originalname} converted to an empty document. `
-        + "Stored without converted content so the workspace can read the file again.",
-      )
-      documentContent = null
-    }
-
-    // The converted document is stored in one statement, so it is bounded by the
-    // database's max_allowed_packet. Checking *here* matters twice over: the
-    // student gets a reason instead of an opaque 500, and an over-sized write
-    // never reaches the connection - MariaDB answers it by resetting the socket,
-    // which also kills a pooled connection another request may be using.
-    const size = await checkStorableDocumentContent(documentContent);
-    if (size.tooLarge) {
-      // Remove the file the upload middleware already wrote: the report was not
-      // accepted, so leaving it behind would accumulate orphaned uploads.
-      try {
-        fs.unlinkSync(filePath);
-      } catch {
-        // The leftovers are harmless if the file cannot be removed.
-      }
-
-      console.warn(`REPORT TOO LARGE TO STORE: ${req.file.originalname} converted to ${size.bytes} bytes (limit ${size.limit}).`);
-      return res.status(413).json({
-        message: tooLargeMessage(size),
-        code: "REPORT_CONTENT_TOO_LARGE",
-        contentBytes: size.bytes,
-        contentLimitBytes: size.limit,
-      });
-    }
+    // Only the file name and location are stored in the database.
+    // The document file on disk is the source of truth, so documentContent is kept null
+    // to avoid storing heavy document blobs in SQL.
+    documentContent = null;
 
     // Hash the stored bytes. The approval is bound to this hash, and the final
     // submission re-checks it, so the file cannot be swapped after approval.
@@ -536,7 +511,22 @@ const submitReport = async (req, res) => {
       console.warn("REPORT HASH ERROR:", hashError.message);
     }
 
-    const existing = await Report.findOne({ where: { studentId: student.id } });
+    let existing = null;
+    if (req.body.reportId) {
+      existing = await Report.findOne({ where: { id: req.body.reportId, studentId: student.id } });
+    } else {
+      // Find an existing report of the SAME document format (docx vs pdf).
+      // This ensures uploading a Word document does not overwrite a PDF report,
+      // and uploading a PDF does not overwrite a Word document — keeping PDF and
+      // Word reports independent on their own.
+      const isDocx = isDocxFile(req.file);
+      const allReports = await Report.findAll({ where: { studentId: student.id }, order: [["updatedAt", "DESC"]] });
+      existing = allReports.find((r) => {
+        const ext = (r.fileName || "").toLowerCase();
+        const rIsDocx = ext.endsWith(".docx") || ext.endsWith(".doc");
+        return isDocx ? rIsDocx : !rIsDocx;
+      }) || null;
+    }
 
     // A finalised report is immutable; only an administrator may unlock it.
     if (existing?.lockedAt) {
@@ -559,7 +549,7 @@ const submitReport = async (req, res) => {
           status: "submitted",
           submittedAt: new Date(),
           progress: 10,
-          documentContent,
+          documentContent: null,
         })
       : await Report.create({
           studentId: student.id,
@@ -570,7 +560,7 @@ const submitReport = async (req, res) => {
           status: "submitted",
           submittedAt: new Date(),
           progress: 10,
-          documentContent,
+          documentContent: null,
         });
 
     // Keep the immutable history. Previously this single row was updated in
@@ -649,28 +639,30 @@ const sendReportToSupervisor = async (req, res) => {
     const report = await Report.findOne({ where: { id: req.params.id, studentId: student.id } });
     if (!report) return res.status(404).json({ message: "Report not found" });
 
-    const internship = await Internship.findOne({ where: { studentId: student.id } });
-    if (!internship) return res.status(400).json({ message: "Internship assignment not found" });
+    let internship = await Internship.findOne({ where: { studentId: student.id } });
+    if (!internship) {
+      internship = await Internship.create({ studentId: student.id, company: "Not specified" });
+    }
 
-    const type = String(req.body.type || req.query.type || "academic").toLowerCase();
-    const isAcademic = type === "academic"
-    const supervisorId = isAcademic ? internship.academicSupervisorId : internship.professionalSupervisorId
-    const supervisorTypeLabel = isAcademic ? "academic" : "professional"
+    const type = String(req.body?.type || req.query?.type || "academic").toLowerCase();
+    const isAcademic = type === "academic";
+    const supervisorId = isAcademic ? internship.academicSupervisorId : internship.professionalSupervisorId;
+    const supervisorTypeLabel = isAcademic ? "academic" : "professional";
 
     if (!supervisorId) {
-      return res.status(400).json({ message: `You must be assigned to a ${supervisorTypeLabel} supervisor before sending a report` });
+      return res.status(400).json({ message: `You must be assigned to an ${supervisorTypeLabel} supervisor before sending a report.` });
     }
 
     await report.update({
       status: "in_review",
       submittedAt: report.submittedAt || new Date(),
-      progress: report.progress || 50,
+      progress: Math.max(report.progress || 0, 50),
     });
 
     await Notification.create({
       userId: supervisorId,
       title: "New report submitted",
-      message: `A student has submitted \"${report.title}\" for your review.`,
+      message: `A student has submitted "${report.title}" for your review.`,
       type: "info",
     });
 
@@ -948,10 +940,40 @@ const getMyTasks = async (req, res) => {
 
     const tasks = await Task.findAll({
       where: { studentId: student.id },
-      order: [["dueDate", "ASC"]],
+      include: [
+        {
+          model: User,
+          as: "supervisor",
+          attributes: ["id", "name", "email", "role"],
+        },
+      ],
+      order: [
+        ["completed", "ASC"],
+        ["dueDate", "ASC"],
+        ["id", "DESC"],
+      ],
     });
 
-    return res.status(200).json({ tasks });
+    const formattedTasks = tasks.map((t) => {
+      const taskJson = t.toJSON();
+      const role = taskJson.supervisorRole || taskJson.supervisor?.role || "supervisor";
+      const roleLabel =
+        role === "academic_supervisor"
+          ? "Academic Supervisor"
+          : role === "professional_supervisor"
+          ? "Professional Supervisor"
+          : "Supervisor";
+
+      return {
+        ...taskJson,
+        supervisorRoleLabel: roleLabel,
+        assignedByLabel: taskJson.supervisor?.name
+          ? `${taskJson.supervisor.name} (${roleLabel})`
+          : roleLabel,
+      };
+    });
+
+    return res.status(200).json({ tasks: formattedTasks });
   } catch (error) {
     console.error("GET MY TASKS ERROR:", error);
     return res.status(500).json({
@@ -962,77 +984,22 @@ const getMyTasks = async (req, res) => {
 };
 
 const toggleTaskComplete = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { id } = req.params;
-
-    const student = await Student.findOne({ where: { userId } });
-    if (!student) {
-      return res.status(404).json({ message: "Student profile not found" });
-    }
-
-    const task = await Task.findOne({
-      where: { id, studentId: student.id },
-    });
-
-    if (!task) {
-      return res.status(404).json({ message: "Task not found" });
-    }
-
-    const newCompleted = !task.completed;
-    await task.update({
-      completed: newCompleted,
-      status: newCompleted ? "completed" : "pending",
-      progress: newCompleted ? 100 : task.progress,
-    });
-
-    return res.status(200).json({ message: "Task updated", task });
-  } catch (error) {
-    console.error("TOGGLE TASK ERROR:", error);
-    return res.status(500).json({
-      message: "Server error while updating task",
-      error: error.message,
-    });
-  }
+  return res.status(403).json({
+    message: "Students cannot manually mark tasks as complete. Submit your completed work for your supervisor to review and approve.",
+  });
 };
 
 const updateTaskProgress = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { id } = req.params;
-    const { progress } = req.body;
-
-    const student = await Student.findOne({ where: { userId } });
-    if (!student) {
-      return res.status(404).json({ message: "Student profile not found" });
-    }
-
-    const task = await Task.findOne({ where: { id, studentId: student.id } });
-    if (!task) {
-      return res.status(404).json({ message: "Task not found" });
-    }
-
-    const clampedProgress = Math.min(100, Math.max(0, parseInt(progress) || 0));
-    const newStatus = clampedProgress === 100 ? "completed" : clampedProgress > 0 ? "in_progress" : "pending";
-
-    await task.update({
-      progress: clampedProgress,
-      status: newStatus,
-      completed: clampedProgress === 100,
-    });
-
-    return res.status(200).json({ message: "Progress updated", task });
-  } catch (error) {
-    console.error("UPDATE TASK PROGRESS ERROR:", error);
-    return res.status(500).json({ message: "Server error", error: error.message });
-  }
+  return res.status(403).json({
+    message: "Students cannot manually update task progress. Submit your work for your supervisor to review.",
+  });
 };
 
 const submitTask = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id } = req.params;
-    const { submissionNote, workUrl } = req.body;
+    const { submissionNote, workUrl, milestoneId } = req.body;
 
     const student = await Student.findOne({
       where: { userId },
@@ -1047,37 +1014,44 @@ const submitTask = async (req, res) => {
       return res.status(404).json({ message: "Task not found" });
     }
 
+    let milestones = Array.isArray(task.milestones) ? [...task.milestones] : [];
+
+    if (milestoneId && milestones.length > 0) {
+      milestones = milestones.map((m) => {
+        if (String(m.id) === String(milestoneId)) {
+          return {
+            ...m,
+            status: "submitted",
+            submittedAt: new Date(),
+            submissionNote: submissionNote ? submissionNote.trim() : m.submissionNote,
+            workUrl: workUrl ? workUrl.trim() : m.workUrl,
+          };
+        }
+        return m;
+      });
+    }
+
     await task.update({
       status: "submitted",
       completed: false,
-      progress: 100,
       submittedAt: new Date(),
-      submissionNote: submissionNote ? submissionNote.trim() : null,
-      workUrl: workUrl ? workUrl.trim() : null,
+      submissionNote: submissionNote ? submissionNote.trim() : task.submissionNote,
+      workUrl: workUrl ? workUrl.trim() : task.workUrl,
+      milestones: milestones.length > 0 ? milestones : task.milestones,
     });
 
-    // Notify Supervisor(s)
+    // Notify Supervisor
     const studentName = student.user?.name || "Student";
-    const notifySupervisorIds = new Set();
-    if (task.supervisorId) notifySupervisorIds.add(task.supervisorId);
-
-    // Also check internship assignment for both Academic & Professional Supervisors
-    const internship = await Internship.findOne({ where: { studentId: student.id } });
-    if (internship) {
-      if (internship.academicSupervisorId) notifySupervisorIds.add(internship.academicSupervisorId);
-      if (internship.professionalSupervisorId) notifySupervisorIds.add(internship.professionalSupervisorId);
-    }
-
-    for (const supervisorId of notifySupervisorIds) {
+    if (task.supervisorId) {
       await Notification.create({
-        userId: supervisorId,
-        title: "Task Submitted for Review",
-        message: `${studentName} submitted work for task: "${task.title}". Please inspect and review.`,
+        userId: task.supervisorId,
+        title: "Task Submission Received",
+        message: `${studentName} submitted work for task "${task.title}". Please review and approve/reject.`,
         type: "info",
       }).catch((err) => console.error("Notification creation error:", err));
     }
 
-    return res.status(200).json({ message: "Task submitted successfully to supervisor for review", task });
+    return res.status(200).json({ message: "Work submitted successfully for supervisor review", task });
   } catch (error) {
     console.error("SUBMIT TASK ERROR:", error);
     return res.status(500).json({ message: "Server error", error: error.message });

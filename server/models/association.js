@@ -14,6 +14,7 @@ import ReportSubmission from "./reportSubmissionModel.js";
 import LibraryEntry from "./libraryEntryModel.js";
 import PlagiarismAnalysis from "./plagiarismAnalysisModel.js";
 import PlagiarismMatch from "./plagiarismMatchModel.js";
+import ReportPlagiarismIndex from "./reportPlagiarismIndexModel.js";
 
 // User → Student
 User.hasOne(Student, {
@@ -126,6 +127,13 @@ PlagiarismAnalysis.belongsTo(ReportVersion, { foreignKey: "reportVersionId", as:
 LibraryEntry.hasMany(PlagiarismAnalysis, { foreignKey: "libraryEntryId", as: "plagiarismAnalyses" });
 PlagiarismAnalysis.belongsTo(LibraryEntry, { foreignKey: "libraryEntryId", as: "libraryEntry" });
 
+// ReportVersion / LibraryEntry → ReportPlagiarismIndex (1:1 plagiarism fingerprint index)
+ReportVersion.hasOne(ReportPlagiarismIndex, { foreignKey: "reportVersionId", as: "plagiarismIndex" });
+ReportPlagiarismIndex.belongsTo(ReportVersion, { foreignKey: "reportVersionId", as: "reportVersion" });
+
+LibraryEntry.hasOne(ReportPlagiarismIndex, { foreignKey: "libraryEntryId", as: "plagiarismIndex" });
+ReportPlagiarismIndex.belongsTo(LibraryEntry, { foreignKey: "libraryEntryId", as: "libraryEntry" });
+
 // User → Meetings (creator)
 User.hasMany(Meeting, {
   foreignKey: "createdBy",
@@ -197,6 +205,7 @@ export {
   LibraryEntry,
   PlagiarismAnalysis,
   PlagiarismMatch,
+  ReportPlagiarismIndex,
 };
 
 export default Internship;

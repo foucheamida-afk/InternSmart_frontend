@@ -33,6 +33,7 @@ import bcrypt from "bcrypt";
 import User from "./models/userModel.js";
 import Student from "./models/studentModel.js";
 import Internship from "./models/studentAssignmentModel.js";
+import ReportPlagiarismIndex from "./models/reportPlagiarismIndexModel.js";
 import { startPlagiarismWorker } from "./jobs/plagiarismWorker.js";
 
 const describeTableSafe = async (tableName) => {
@@ -332,6 +333,8 @@ const ensureTaskFeedbackColumns = async () => {
     feedbackProfessional: { type: DataTypes.TEXT, allowNull: true },
     feedbackProfessionalAt: { type: DataTypes.DATE, allowNull: true },
     feedbackProfessionalBy: { type: DataTypes.INTEGER, allowNull: true },
+    supervisorRole: { type: DataTypes.STRING, allowNull: true },
+    milestones: { type: DataTypes.JSON, allowNull: true },
   };
 
   for (const [name, definition] of Object.entries(missingColumns)) {
@@ -537,8 +540,8 @@ const ensureReportWorkflowColumns = async () => {
 
   if (Number(pendingVersions) > 0) {
     await sequelize.query(
-      `INSERT INTO ReportVersions (reportId, versionNumber, fileName, fileUrl, extractedText, uploadedBy, createdAt, updatedAt)
-       SELECT r.id, COALESCE(r.version, 1), r.fileName, r.fileUrl, NULL, NULL, COALESCE(r.submittedAt, NOW()), NOW()
+      `INSERT INTO ReportVersions (reportId, versionNumber, fileName, fileUrl, uploadedBy, createdAt, updatedAt)
+       SELECT r.id, COALESCE(r.version, 1), r.fileName, r.fileUrl, NULL, COALESCE(r.submittedAt, NOW()), NOW()
          FROM Reports r
         WHERE NOT EXISTS (SELECT 1 FROM ReportVersions v WHERE v.reportId = r.id)`
     );
@@ -576,25 +579,62 @@ const ensureInternshipAcademicYearColumns = async () => {
   }
 };
 
-// Corpus fingerprint columns on the virtual library (phase 4). Without these the
-// internal similarity engine has no index to compare a new report against.
+// Migration for dedicated ReportPlagiarismIndex table and removal of legacy columns.
 const ensureLibraryCorpusColumns = async () => {
   const queryInterface = sequelize.getQueryInterface();
-  const columns = await queryInterface.describeTable("LibraryEntries");
 
-  const missingColumns = {
-    corpusSignature: { type: DataTypes.JSON, allowNull: true },
-    corpusShingles: { type: DataTypes.JSON, allowNull: true },
-    corpusWordCount: { type: DataTypes.INTEGER, allowNull: true },
-    corpusAlgorithmVersion: { type: DataTypes.STRING, allowNull: true },
-    corpusIndexedAt: { type: DataTypes.DATE, allowNull: true },
-  };
+  // 1. Ensure table exists
+  await ReportPlagiarismIndex.sync();
 
-  for (const [name, definition] of Object.entries(missingColumns)) {
-    if (!columns[name]) {
-      await queryInterface.addColumn("LibraryEntries", name, definition);
-      console.log(`Added missing LibraryEntries.${name} column`);
+  // 2. Check if legacy columns exist on LibraryEntries and migrate data
+  const libraryColumns = await queryInterface.describeTable("LibraryEntries");
+  if (libraryColumns.corpusSignature || libraryColumns.corpusShingles) {
+    try {
+      const [legacyEntries] = await sequelize.query(`
+        SELECT id, reportVersionId, corpusSignature, corpusShingles, corpusWordCount, corpusAlgorithmVersion, corpusIndexedAt
+        FROM LibraryEntries
+        WHERE corpusSignature IS NOT NULL OR corpusShingles IS NOT NULL
+      `);
+
+      for (const entry of legacyEntries) {
+        if (!entry.reportVersionId) continue;
+        const existingIndex = await ReportPlagiarismIndex.findOne({
+          where: { reportVersionId: entry.reportVersionId },
+        });
+
+        if (!existingIndex) {
+          await ReportPlagiarismIndex.create({
+            reportVersionId: entry.reportVersionId,
+            libraryEntryId: entry.id,
+            corpusSignature: typeof entry.corpusSignature === "string" ? JSON.parse(entry.corpusSignature) : entry.corpusSignature,
+            corpusShingles: typeof entry.corpusShingles === "string" ? JSON.parse(entry.corpusShingles) : entry.corpusShingles,
+            corpusWordCount: entry.corpusWordCount,
+            algorithmVersion: entry.corpusAlgorithmVersion || "v1",
+            indexedAt: entry.corpusIndexedAt || new Date(),
+          });
+        }
+      }
+      if (legacyEntries.length > 0) {
+        console.log(`Migrated ${legacyEntries.length} legacy plagiarism index rows to ReportPlagiarismIndexes.`);
+      }
+    } catch (err) {
+      console.warn("Legacy plagiarism index migration warning:", err.message);
     }
+
+    const toDrop = ["corpusSignature", "corpusShingles", "corpusWordCount", "corpusAlgorithmVersion", "corpusIndexedAt"];
+    for (const col of toDrop) {
+      if (libraryColumns[col]) {
+        await queryInterface.removeColumn("LibraryEntries", col).catch((e) => console.warn(`Drop LibraryEntries.${col} warn:`, e.message));
+        console.log(`Dropped legacy LibraryEntries.${col} column`);
+      }
+    }
+  }
+
+  // 3. Drop extractedText from ReportVersions if it exists
+  const versionColumns = await queryInterface.describeTable("ReportVersions");
+  if (versionColumns.extractedText) {
+    await queryInterface.removeColumn("ReportVersions", "extractedText").catch((e) => console.warn("Drop ReportVersions.extractedText warn:", e.message));
+    console.log("Dropped legacy ReportVersions.extractedText column");
   }
 };
 
@@ -658,7 +698,9 @@ app.use(errorEnvelope);
 
 app.use("/api/test", testRoutes);
 app.use(express.urlencoded({ extended: true }));
-app.use("/uploads", express.static("uploads"));
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+app.use("/uploads", express.static(path.resolve(process.cwd(), "..", "uploads")));
+app.use("/uploads", express.static(path.resolve(process.cwd(), "server", "uploads")));
 app.use("/api/ai", aiRoutes);
 // Routes
 app.use("/api/users", authRoutes);

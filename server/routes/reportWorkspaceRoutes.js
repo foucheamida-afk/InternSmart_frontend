@@ -11,6 +11,8 @@ import {
   getPdfWorkspace,
   savePdfFile,
   patchPdfWorkspace,
+  savePdfOverlay,
+  exportModifiedPdf,
 } from "../controllers/pdfWorkspaceController.js";
 import { PDF_SAVE_LIMIT } from "../config/requestLimits.js";
 
@@ -24,16 +26,22 @@ const workspaceRoles = authorize("student", "academic_supervisor", "professional
 router.get("/reports/:id/workspace", protect, workspaceRoles, getReportWorkspace);
 
 // --- PDF workshop -----------------------------------------------------------
-//
-// A PDF report is not converted into stored content: it is opened as a file, its
-// structure is derived on demand, and saving writes the regenerated PDF back
-// over that file. See controllers/pdfWorkspaceController.js.
-//
-// The file route accepts its token from the query string as well as the header,
-// because an <iframe> cannot send an Authorization header; the guard that does
-// that is `authenticatePdfFileRequest`, and it only ever exposes a read.
 router.get("/reports/:id/pdf", protect, workspaceRoles, getPdfWorkspace);
 router.get("/reports/:id/pdf/file", authenticatePdfFileRequest, getPdfFile);
+router.put(
+  "/reports/:id/pdf/overlay",
+  protect,
+  authorize("student"),
+  express.json({ limit: "10mb" }),
+  savePdfOverlay
+);
+router.post(
+  "/reports/:id/pdf/export",
+  protect,
+  workspaceRoles,
+  express.json({ limit: "10mb" }),
+  exportModifiedPdf
+);
 router.put(
   "/reports/:id/pdf/patch",
   protect,

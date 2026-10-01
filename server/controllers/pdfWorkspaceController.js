@@ -219,6 +219,7 @@ export const getPdfWorkspace = async (req, res) => {
       warnings,
       sections: outlineFromStructure(structure),
       comments,
+      pdfOverlayData: report.pdfOverlayData || { elements: [] },
       // The collaboration session name. Clients join this to edit the same
       // document; it carries no data itself. The version suffix is explained at
       // PDF_LAYOUT_VERSION.
@@ -402,20 +403,20 @@ export const patchPdfWorkspace = async (req, res) => {
       return res.status(404).json({ message: "The PDF file for this report is missing from the server.", code: "REPORT_FILE_MISSING" });
     }
 
-    const { changes } = req.body || {};
-    if (!Array.isArray(changes)) {
-      return res.status(400).json({ message: "Invalid patch request: changes must be an array." });
-    }
+    const { changes, header, footer } = req.body || {};
+    const changeList = Array.isArray(changes) ? changes : [];
 
-    // Filter out unchanged blocks
-    const filtered = changes.filter(
-      (c) => c && typeof c.originalText === "string" && typeof c.currentText === "string" && c.originalText.trim() !== c.currentText.trim()
+    // Filter out unchanged blocks unless eraseOriginal or custom text overlay is specified
+    const filtered = changeList.filter(
+      (c) => c && ((typeof c.originalText === "string" && typeof c.currentText === "string" && c.originalText.trim() !== c.currentText.trim()) || c.eraseOriginal || c.isOverlay)
     );
 
-    if (filtered.length === 0) {
+    const hasHeaderFooter = Boolean(header?.enabled || footer?.enabled);
+
+    if (filtered.length === 0 && !hasHeaderFooter) {
       const stats = await fsp.stat(absolutePath);
       return res.json({
-        message: "No text changes detected to save.",
+        message: "No text changes or header/footer updates detected to save.",
         fileName: report.fileName,
         fileRevision: `${stats.size}:${Math.round(stats.mtimeMs)}`,
         savedAt: new Date().toISOString(),
@@ -425,7 +426,7 @@ export const patchPdfWorkspace = async (req, res) => {
 
     // Apply patch to original PDF file on disk using pdf-lib
     const { patchPdf } = await import("../services/pdfPatchService.js");
-    const result = await patchPdf(absolutePath, filtered);
+    const result = await patchPdf(absolutePath, filtered, { header, footer });
 
     forgetPdfStructure(absolutePath);
 
@@ -457,11 +458,80 @@ export const patchPdfWorkspace = async (req, res) => {
   }
 };
 
+/**
+ * Save overlay metadata without modifying the original PDF file on disk.
+ *
+ * PUT /api/workspace/reports/:id/pdf/overlay
+ */
+export const savePdfOverlay = async (req, res) => {
+  try {
+    const { report, error } = await resolvePdfReport(req);
+    if (error) return res.status(error.status).json({ message: error.message, code: error.code });
+
+    if (req.user.role !== "student") {
+      return res.status(403).json({ message: "Only the student author can edit this report overlay." });
+    }
+
+    if (report.lockedAt) {
+      return res.status(423).json({ message: "This report has been finalised, so its PDF workspace can no longer be edited." });
+    }
+
+    const overlayData = req.body?.overlayData || req.body || { elements: [] };
+    await report.update({ pdfOverlayData: overlayData, updatedAt: new Date() });
+
+    return res.json({
+      message: "Overlay metadata saved successfully.",
+      savedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("SAVE PDF OVERLAY ERROR:", error);
+    return res.status(500).json({ message: "Unable to save PDF overlay metadata." });
+  }
+};
+
+/**
+ * Export the modified PDF synthesized with overlay elements.
+ * The original PDF on disk remains 100% untouched.
+ *
+ * POST /api/workspace/reports/:id/pdf/export
+ */
+export const exportModifiedPdf = async (req, res) => {
+  try {
+    const { report, error } = await resolvePdfReport(req);
+    if (error) return res.status(error.status).json({ message: error.message, code: error.code });
+
+    const { absolutePath } = await pdfFileFor(report);
+    if (!absolutePath) {
+      return res.status(404).json({ message: "The PDF file for this report is missing from the server." });
+    }
+
+    const overlayData = req.body?.overlayData || report.pdfOverlayData || { elements: [] };
+    const { synthesizePdfOverlay } = await import("../services/pdfPatchService.js");
+
+    const pdfBytes = await synthesizePdfOverlay(absolutePath, overlayData);
+
+    const exportFileName = (report.fileName || "report")
+      .replace(/\.pdf$/i, "")
+      .concat("-modified.pdf");
+
+    res.setHeader("Content-Type", PDF_MIME);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(exportFileName)}"`);
+    res.setHeader("Content-Length", pdfBytes.length);
+
+    return res.send(Buffer.from(pdfBytes));
+  } catch (error) {
+    console.error("EXPORT MODIFIED PDF ERROR:", error);
+    return res.status(500).json({ message: error.message || "Unable to export synthesized PDF document." });
+  }
+};
+
 export default {
   getPdfWorkspace,
   getPdfFile,
   savePdfFile,
   patchPdfWorkspace,
+  savePdfOverlay,
+  exportModifiedPdf,
   authenticatePdfFileRequest,
   forgetPdfStructure,
 };

@@ -35,6 +35,7 @@ import Student from "../models/studentModel.js";
 import Report from "../models/reportModel.js";
 import ReportVersion from "../models/reportVersionModel.js";
 import ReportComment from "../models/reportCommentModel.js";
+import Internship from "../models/studentAssignmentModel.js";
 import reportWorkspaceRoutes from "../routes/reportWorkspaceRoutes.js";
 import { WORKSPACE_JSON_LIMIT } from "../config/requestLimits.js";
 import { encodeRgbaPng } from "../utils/pngEncoder.js";
@@ -81,6 +82,7 @@ let currentUser = { id: STUDENT_USER_ID, active: true, role: "student", onboardi
 // --- the only fakes in this file ------------------------------------------
 User.findByPk = async () => currentUser;
 Student.findOne = async () => ({ id: STUDENT_ID, userId: STUDENT_USER_ID });
+Internship.count = async () => 0;
 Report.findByPk = async () => (report.__missing ? null : report);
 ReportVersion.findByPk = async () => version;
 ReportVersion.update = async (values, options) => {

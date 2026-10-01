@@ -58,18 +58,6 @@ const ReportVersion = sequelize.define(
       allowNull: true,
     },
 
-    // Extracted plain text for the similarity engine. LONGTEXT rather than TEXT:
-    // a report's text routinely exceeds the 64 KB TEXT ceiling and would be
-    // silently truncated under STRICT_TRANS_TABLES.
-    //
-    // Left NULL on upload in this phase; the engine (phase 4) fills it by
-    // extracting from the stored file, so the text and the archived bytes cannot
-    // drift apart.
-    extractedText: {
-      type: DataTypes.TEXT("long"),
-      allowNull: true,
-    },
-
     pageCount: {
       type: DataTypes.INTEGER,
       allowNull: true,
