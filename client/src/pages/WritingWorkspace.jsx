@@ -36,6 +36,7 @@ import { plainTextDocument, sanitizeEditorContent } from '../editor/contentGuard
 import '../assets/css/writing-workspace.css'
 import '../assets/css/writing-pagination.css'
 import '../assets/css/writing-review.css'
+import MarkdownMessage from '../components/ai/MarkdownMessage'
 
 // FontSize and FontFamily are built into @tiptap/extension-text-style v3
 // — no custom extension needed
@@ -1658,7 +1659,10 @@ export default function WritingWorkspace() {
                       aiMessages.map((m) => (
                         <div key={m.id} className={`flex flex-col ${m.sender === 'user' ? 'items-end' : 'items-start'}`}>
                           <div className={`p-2.5 rounded-xl max-w-[90%] text-xs ${m.sender === 'user' ? 'bg-[var(--orange)] text-white' : 'bg-[var(--bg-panel)] border border-[var(--line)] text-[var(--text-soft)]'}`}>
-                            {m.text}
+                            {m.sender === 'ai'
+                              ? <MarkdownMessage text={m.text} />
+                              : m.text
+                            }
                           </div>
                         </div>
                       ))
@@ -1889,7 +1893,10 @@ export default function WritingWorkspace() {
                                   color: m.sender === 'user' ? 'white' : 'var(--text-soft)'
                                 }}
                               >
-                                <p className="whitespace-pre-wrap leading-relaxed">{m.text}</p>
+                                {m.sender === 'ai'
+                                  ? <MarkdownMessage text={m.text} />
+                                  : <p className="whitespace-pre-wrap leading-relaxed">{m.text}</p>
+                                }
                               </div>
                             </div>
                           ))

@@ -10,14 +10,60 @@ import { adminApi } from '../../services/adminService'
    CSV Parsing & Validation Utilities
    ───────────────────────────────────────────── */
 
-const parseCSVLine = (line) => {
+const HEADER_MAP = {
+  'student_name': 'student_name',
+  'studentname': 'student_name',
+  'student name': 'student_name',
+  'name': 'student_name',
+  'full_name': 'student_name',
+  'fullname': 'student_name',
+  'student_email': 'student_email',
+  'studentemail': 'student_email',
+  'student email': 'student_email',
+  'email': 'student_email',
+  'student_matricule': 'student_matricule',
+  'studentmatricule': 'student_matricule',
+  'student matricule': 'student_matricule',
+  'matricule': 'student_matricule',
+  'student_id': 'student_matricule',
+  'class': 'class',
+  'student_class': 'class',
+  'student class': 'class',
+  'academic_supervisor_name': 'academic_supervisor_name',
+  'academicsupervisorname': 'academic_supervisor_name',
+  'academic supervisor name': 'academic_supervisor_name',
+  'supervisor_name': 'academic_supervisor_name',
+  'supervisor name': 'academic_supervisor_name',
+  'academic_supervisor_email': 'academic_supervisor_email',
+  'academicsupervisoremail': 'academic_supervisor_email',
+  'academic supervisor email': 'academic_supervisor_email',
+  'supervisor_email': 'academic_supervisor_email',
+  'supervisor email': 'academic_supervisor_email',
+  'professional_supervisor_name': 'professional_supervisor_name',
+  'professionalsupervisorname': 'professional_supervisor_name',
+  'professional supervisor name': 'professional_supervisor_name',
+  'professional_supervisor_email': 'professional_supervisor_email',
+  'professionalsupervisoremail': 'professional_supervisor_email',
+  'professional supervisor email': 'professional_supervisor_email',
+}
+
+const detectDelimiter = (line) => {
+  const commas = (line.match(/,/g) || []).length
+  const semicolons = (line.match(/;/g) || []).length
+  const tabs = (line.match(/\t/g) || []).length
+  if (semicolons > commas && semicolons > tabs) return ';'
+  if (tabs > commas && tabs > semicolons) return '\t'
+  return ','
+}
+
+const parseCSVLine = (line, delim = ',') => {
   const result = []
   let current = ''
   let inQuotes = false
   for (let i = 0; i < line.length; i++) {
     if (line[i] === '"') {
       inQuotes = !inQuotes
-    } else if (line[i] === ',' && !inQuotes) {
+    } else if (line[i] === delim && !inQuotes) {
       result.push(current.trim())
       current = ''
     } else {
@@ -29,14 +75,18 @@ const parseCSVLine = (line) => {
 }
 
 const parseCSV = (text) => {
-  const lines = text.split(/\r?\n/).filter(l => l.trim())
+  const cleanText = text.replace(/^\uFEFF/, '')
+  const lines = cleanText.split(/\r?\n/).filter(l => l.trim())
   if (lines.length === 0) return { headers: [], rows: [] }
 
-  const headers = parseCSVLine(lines[0]).map(h =>
+  const delim = detectDelimiter(lines[0])
+  const rawHeaders = parseCSVLine(lines[0], delim).map(h =>
     h.toLowerCase().replace(/^['"]|['"]$/g, '').trim()
   )
+  const headers = rawHeaders.map(h => HEADER_MAP[h] || h)
+
   const rows = lines.slice(1).map((line, i) => {
-    const values = parseCSVLine(line)
+    const values = parseCSVLine(line, delim)
     const row = { _rowNumber: i + 2 }
     headers.forEach((h, j) => {
       row[h] = (values[j] || '').replace(/^['"]|['"]$/g, '').trim()

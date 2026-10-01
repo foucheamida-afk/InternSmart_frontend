@@ -1,5 +1,6 @@
 node_modules/
 .env
+.env.local
 
 # Uploaded student documents (report PDFs, CSV rosters) are user data and must
 # not enter version control. They live only on the server filesystem.
@@ -7,3 +8,7 @@ server/uploads/
 
 # Local database dumps / scratch artefacts
 *.sql
+
+# Apryse WebViewer SDK static assets — large binary bundle, restored by npm postinstall.
+# Run: Copy-Item -Recurse node_modules/@pdftron/webviewer/public/* client/public/webviewer/
+client/public/webviewer/

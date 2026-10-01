@@ -38,6 +38,7 @@ import '../assets/css/dashboard-components.css'
 import api from "../api/axios";
 import { askWritingAssistant } from "../services/aiService";
 import { getStoredToken, clearStoredAuth } from "../utils/storage";
+import MarkdownMessage from "../components/ai/MarkdownMessage";
 
 export default function AIFeedback() {
   const navigate = useNavigate()
@@ -634,7 +635,10 @@ export default function AIFeedback() {
                               color: msg.sender === 'user' ? 'white' : 'var(--text-soft)'
                             }}
                           >
-                            {msg.text}
+                            {msg.sender === 'ai'
+                              ? <MarkdownMessage text={msg.text} />
+                              : msg.text
+                            }
 
                             {/* Inline Inspect Errors Icon for AI Messages */}
                             {msg.sender === 'ai' && reportErrorItems.length > 0 && (
@@ -890,7 +894,10 @@ export default function AIFeedback() {
                                       color: msg.sender === 'user' ? 'white' : 'var(--text-soft)'
                                     }}
                                   >
-                                    <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                                    {msg.sender === 'ai'
+                                      ? <MarkdownMessage text={msg.text} />
+                                      : <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                                    }
                                   </div>
                                   <span className="text-[9px] mt-1 px-1" style={{ color: 'var(--text-muted)' }}>{msg.time}</span>
                                 </div>

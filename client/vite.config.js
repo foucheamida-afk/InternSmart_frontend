@@ -7,6 +7,8 @@ import path from 'path';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
+    port: 5173,
+    strictPort: true,
     // Editor/agent tooling writes files atomically through sibling temp
     // directories (e.g. .App.jsx.<pid>.<uuid>.tmpdir/App.jsx.tmp). Vite's file
     // watcher crashes with EBUSY if one is locked mid-write, which repeatedly

@@ -540,14 +540,85 @@ export const importCSV = async (req, res) => {
       return res.status(400).json({ message: verdict.reason });
     }
 
-    const csvContent = csvBuffer.toString("utf-8");
+    const csvContent = csvBuffer.toString("utf-8").replace(/^\uFEFF/, "");
     const lines = csvContent.split("\n").filter(line => line.trim());
 
     if (lines.length < 2) {
       return res.status(400).json({ message: "CSV file is empty or invalid" });
     }
 
-    const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+    const HEADER_MAP = {
+      "student_name": "student_name",
+      "studentname": "student_name",
+      "student name": "student_name",
+      "name": "student_name",
+      "full_name": "student_name",
+      "fullname": "student_name",
+      "student_email": "student_email",
+      "studentemail": "student_email",
+      "student email": "student_email",
+      "email": "student_email",
+      "student_matricule": "student_matricule",
+      "studentmatricule": "student_matricule",
+      "student matricule": "student_matricule",
+      "matricule": "student_matricule",
+      "student_id": "student_matricule",
+      "class": "class",
+      "student_class": "class",
+      "student class": "class",
+      "academic_supervisor_name": "academic_supervisor_name",
+      "academicsupervisorname": "academic_supervisor_name",
+      "academic supervisor name": "academic_supervisor_name",
+      "supervisor_name": "academic_supervisor_name",
+      "supervisor name": "academic_supervisor_name",
+      "academic_supervisor_email": "academic_supervisor_email",
+      "academicsupervisoremail": "academic_supervisor_email",
+      "academic supervisor email": "academic_supervisor_email",
+      "supervisor_email": "academic_supervisor_email",
+      "supervisor email": "academic_supervisor_email",
+      "professional_supervisor_name": "professional_supervisor_name",
+      "professionalsupervisorname": "professional_supervisor_name",
+      "professional supervisor name": "professional_supervisor_name",
+      "professional_supervisor_email": "professional_supervisor_email",
+      "professionalsupervisoremail": "professional_supervisor_email",
+      "professional supervisor email": "professional_supervisor_email",
+    };
+
+    // Detect CSV delimiter (comma, semicolon, or tab) to handle Excel exports across all OS locales
+    const detectDelimiter = (line) => {
+      const commas = (line.match(/,/g) || []).length;
+      const semicolons = (line.match(/;/g) || []).length;
+      const tabs = (line.match(/\t/g) || []).length;
+      if (semicolons > commas && semicolons > tabs) return ";";
+      if (tabs > commas && tabs > semicolons) return "\t";
+      return ",";
+    };
+
+    const delimiter = detectDelimiter(lines[0]);
+
+    // Quote-aware CSV line parser
+    const parseCsvLine = (line, delim) => {
+      const result = [];
+      let current = "";
+      let inQuotes = false;
+      for (let charIndex = 0; charIndex < line.length; charIndex++) {
+        const char = line[charIndex];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === delim && !inQuotes) {
+          result.push(current.trim().replace(/^"|"$/g, ""));
+          current = "";
+        } else {
+          current += char;
+        }
+      }
+      result.push(current.trim().replace(/^"|"$/g, ""));
+      return result;
+    };
+
+    const rawHeaders = parseCsvLine(lines[0], delimiter).map(h => h.toLowerCase());
+    const headers = rawHeaders.map(h => HEADER_MAP[h] || h);
+
     const requiredHeaders = [
       "student_name",
       "student_email",
@@ -560,7 +631,7 @@ export const importCSV = async (req, res) => {
 
     if (missingHeaders.length > 0) {
       return res.status(400).json({
-        message: "Missing required columns",
+        message: `Missing required column headers: ${missingHeaders.join(", ")}.`,
         missing: missingHeaders,
       });
     }
@@ -627,7 +698,7 @@ export const importCSV = async (req, res) => {
     };
 
     for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(",").map(v => v.trim());
+      const values = parseCsvLine(lines[i], delimiter);
       const row = {};
       headers.forEach((header, index) => {
         row[header] = values[index] || "";

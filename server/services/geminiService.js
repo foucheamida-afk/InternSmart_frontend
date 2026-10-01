@@ -21,6 +21,16 @@ function extractErrorMessage(error) {
   return details;
 }
 
+/**
+ * generateGeminiResponse
+ *
+ * options:
+ *   thinking    {boolean}  – true  → let model use full thinking budget (deep analysis)
+ *                          – false → thinkingBudget=0, fastest possible response (chat/assistant)
+ *                          Defaults to false.
+ *   maxCharLimit {number}  – truncate prompt at this many chars (default 120 000)
+ *   maxRetries   {number}  – retry attempts (default 3)
+ */
 export async function generateGeminiResponse(prompt, options = {}) {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("GEMINI_API_KEY is not configured in the server environment (.env).");
@@ -30,52 +40,65 @@ export async function generateGeminiResponse(prompt, options = {}) {
     ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   }
 
-  // Ensure prompt isn't excessively huge to avoid socket drops/payload overflow
+  // Truncate oversized prompts to avoid socket drop / payload overflow
   const maxCharLimit = options.maxCharLimit || 120000;
   let finalPrompt = prompt;
   if (typeof prompt === "string" && prompt.length > maxCharLimit) {
-    console.warn(`[GeminiService] Prompt length (${prompt.length}) exceeded limit. Truncating to ${maxCharLimit} characters.`);
+    console.warn(
+      `[GeminiService] Prompt length (${prompt.length}) exceeded limit. Truncating to ${maxCharLimit} chars.`
+    );
     finalPrompt = prompt.slice(0, maxCharLimit) + "\n\n[Content truncated for analysis]";
   }
+
+  // Thinking mode:
+  //   options.thinking = true  → deep report analysis, let the model think freely
+  //   options.thinking = false → writing assistant chat, disable thinking for speed
+  const thinkingConfig = options.thinking === true
+    ? {}                      // unrestricted thinking (analysis tasks)
+    : { thinkingBudget: 0 };  // no thinking (fast chat responses)
 
   const maxRetries = options.maxRetries || 3;
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      // Primary approach: Interactions API
-      const primaryModel = process.env.GEMINI_MODEL || "gemini-3.6-flash";
+      // Primary: Interactions API
+      const primaryModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
       const interaction = await ai.interactions.create({
         model: primaryModel,
         input: finalPrompt,
         store: false,
+        config: { thinkingConfig },
       });
 
       if (interaction.output_text) return interaction.output_text;
 
-      const textOutput = interaction.outputs?.find((output) => output.type === "text");
+      const textOutput = interaction.outputs?.find((o) => o.type === "text");
       if (textOutput?.text) return textOutput.text;
 
       throw new Error("Gemini returned an empty response.");
     } catch (error) {
       lastError = error;
-      const errorMsg = extractErrorMessage(error);
-      console.error(`[GeminiService] Attempt ${attempt}/${maxRetries} failed:`, errorMsg);
+      console.error(
+        `[GeminiService] Attempt ${attempt}/${maxRetries} failed:`,
+        extractErrorMessage(error)
+      );
 
-      // Attempt fallback using models.generateContent if interactions.create failed
+      // Fallback: models.generateContent
       try {
         const fallbackModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash";
         const contentRes = await ai.models.generateContent({
           model: fallbackModel,
           contents: finalPrompt,
+          config: { thinkingConfig },
         });
 
         if (contentRes.text) {
           console.log("[GeminiService] Fallback generateContent succeeded!");
           return contentRes.text;
         }
-      } catch (fallbackErr) {
-        // Fallback error, continue to retry loop if attempts remain
+      } catch {
+        // Continue to retry loop
       }
 
       if (attempt < maxRetries) {
@@ -86,6 +109,7 @@ export async function generateGeminiResponse(prompt, options = {}) {
     }
   }
 
-  const finalCause = extractErrorMessage(lastError);
-  throw new Error(`Failed to communicate with Gemini: ${finalCause}`);
+  throw new Error(
+    `Failed to communicate with Gemini: ${extractErrorMessage(lastError)}`
+  );
 }

@@ -36,7 +36,7 @@ export async function reviewReport(req, res) {
       buildReportReviewPrompt(text);
 
     const rawResponse =
-      await generateGeminiResponse(prompt);
+      await generateGeminiResponse(prompt, { thinking: true });
 
     const cleanedResponse = rawResponse
       .replace(/```json/g, "")

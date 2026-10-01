@@ -1,6 +1,10 @@
+import path from "path";
+import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, ".env") });
 
 import express from "express";
 import cors from "cors";
@@ -28,7 +32,6 @@ import reviewRoutes from "./routes/reviewRoutes.js";
 import libraryRoutes from "./routes/libraryRoutes.js";
 import plagiarismRoutes from "./routes/plagiarismRoutes.js";
 import fs from "fs";
-import path from "path";
 import bcrypt from "bcrypt";
 import User from "./models/userModel.js";
 import Student from "./models/studentModel.js";
@@ -716,6 +719,14 @@ app.use("/api/workspace", reportWorkspaceRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/library", libraryRoutes);
 app.use("/api/plagiarism", plagiarismRoutes);
+
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "InternSmart API Server is online on port 3000.",
+    appUrl: "http://localhost:5173",
+  });
+});
 
 // Last in the stack, deliberately: unmatched routes and thrown errors are the
 // two cases no handler covers, and both previously produced an HTML body that a
