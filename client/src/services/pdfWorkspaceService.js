@@ -35,9 +35,9 @@ export const savePdfFile = async (reportId, blob) => {
   return data
 }
 
-/** Patch specific modified text blocks in the PDF file on disk. */
-export const patchPdfFile = async (reportId, changes) => {
-  const { data } = await api.put(`${base(reportId)}/patch`, { changes })
+/** Patch specific modified text blocks & header/footer in the PDF file on disk. */
+export const patchPdfFile = async (reportId, changes, options = {}) => {
+  const { data } = await api.put(`${base(reportId)}/patch`, { changes, ...options })
   return data
 }
 
@@ -64,6 +64,25 @@ export const downloadPdfFile = async (reportId, fileName) => {
   const link = document.createElement('a')
   link.href = url
   link.download = fileName || 'report.pdf'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+/** Save persistent overlay metadata without altering original PDF file. */
+export const savePdfOverlay = async (reportId, overlayData) => {
+  const { data } = await api.put(`${base(reportId)}/overlay`, { overlayData })
+  return data
+}
+
+/** Export synthesized modified PDF file. */
+export const exportModifiedPdf = async (reportId, overlayData, fileName) => {
+  const response = await api.post(`${base(reportId)}/export`, { overlayData }, { responseType: 'blob' })
+  const url = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName || 'report-modified.pdf'
   document.body.appendChild(link)
   link.click()
   link.remove()

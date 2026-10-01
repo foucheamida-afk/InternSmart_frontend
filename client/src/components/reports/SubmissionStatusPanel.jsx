@@ -8,6 +8,7 @@ import {
   Lock,
   Send,
   ShieldCheck,
+  X,
   XCircle,
 } from 'lucide-react'
 import {
@@ -311,7 +312,18 @@ const SubmissionStatusPanel = ({ reportId }) => {
             className="w-full max-w-md rounded-[24px] border p-6"
             style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--line)', color: 'var(--text)' }}
           >
-            <h3 className="text-lg font-semibold tracking-[-0.03em]">Submit this as your final report?</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold tracking-[-0.03em]">Submit this as your final report?</h3>
+              <button
+                type="button"
+                onClick={() => setConfirmOpen(false)}
+                className="rounded-full border p-1.5 transition cursor-pointer hover:bg-white/10 shrink-0 ml-2"
+                style={{ borderColor: 'var(--line)', color: 'var(--text-muted)' }}
+                title="Close modal"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
             <p className="mt-3 text-sm" style={{ color: 'var(--text-soft)' }}>
               Both supervisors have approved. Once submitted, this version is archived and <strong>cannot be

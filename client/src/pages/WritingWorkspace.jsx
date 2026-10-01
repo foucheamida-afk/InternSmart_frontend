@@ -227,6 +227,33 @@ export default function WritingWorkspace() {
   const [yjsDoc] = useState(() => new Y.Doc())
   const storageKey = `${DOCUMENT_PREFIX}${reportId || 'new'}`
 
+  const [headerConfig, setHeaderConfig] = useState({
+    enabled: true,
+    text: 'Internship Report — Final Document',
+    fontFamily: 'Inter',
+    fontSize: '10pt',
+    bold: false,
+    italic: true,
+    alignment: 'center',
+    showSeparator: true,
+    differentFirstPage: true,
+  })
+
+  const [footerConfig, setFooterConfig] = useState({
+    enabled: true,
+    text: 'InternSmart Professional Workspace',
+    fontFamily: 'Inter',
+    fontSize: '9pt',
+    bold: false,
+    italic: false,
+    alignment: 'right',
+    showSeparator: true,
+    pageNumbering: {
+      enabled: true,
+      format: 'Page {page} of {total}',
+    },
+  })
+
   // Debounced saving. Previously a PUT fired from onUpdate, i.e. one full-document
   // database write on every keystroke. Edits are now coalesced into a single write,
   // and whatever is still pending is flushed when the report changes or the
@@ -656,8 +683,8 @@ export default function WritingWorkspace() {
       // no row to read, so the live editor document is sent instead.
       if (reportId) await flushWorkspaceSave()
       const payload = reportId
-        ? { reportId: Number(reportId), title }
-        : { documentContent: editor.getJSON(), title }
+        ? { reportId: Number(reportId), title, header: headerConfig, footer: footerConfig }
+        : { documentContent: editor.getJSON(), title, header: headerConfig, footer: footerConfig }
 
       const response = await api.post('/workspace/export-word', payload, { responseType: 'blob' })
       downloadWordFile(new Blob([response.data], { type: WORD_MIME }), wordFileName())
@@ -1028,9 +1055,33 @@ export default function WritingWorkspace() {
       <div className="ww-ribbon-group">
         <div className="ww-ribbon-group-title">Header & Footer</div>
         <div className="ww-ribbon-buttons">
-          <ToolbarButton label="Header" onClick={() => editor?.chain().focus().insertContent('<header style="text-align:center; border-bottom: 1px solid #ccc; padding: 10px;">Header</header>').run()} title="Header"><FileText size={16} /></ToolbarButton>
-          <ToolbarButton label="Footer" onClick={() => editor?.chain().focus().insertContent('<footer style="text-align:center; border-top: 1px solid #ccc; padding: 10px;">Footer</footer>').run()} title="Footer"><FileText size={16} /></ToolbarButton>
-          <ToolbarButton label="Page Number" onClick={() => editor?.chain().focus().insertContent('<span style="float: right;">Page </span>').run()} title="Page Number"><Hash size={16} /></ToolbarButton>
+          <ToolbarButton
+            label="Toggle Header"
+            active={headerConfig.enabled}
+            onClick={() => setHeaderConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
+            title="Enable/Disable Header"
+          >
+            <FileText size={16} />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Toggle Footer"
+            active={footerConfig.enabled}
+            onClick={() => setFooterConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
+            title="Enable/Disable Footer"
+          >
+            <FileText size={16} />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Toggle Page Numbers"
+            active={footerConfig.pageNumbering?.enabled}
+            onClick={() => setFooterConfig((prev) => ({
+              ...prev,
+              pageNumbering: { ...prev.pageNumbering, enabled: !prev.pageNumbering?.enabled },
+            }))}
+            title="Toggle Automatic Page Numbers"
+          >
+            <Hash size={16} />
+          </ToolbarButton>
         </div>
       </div>
       <div className="ww-ribbon-group">
@@ -1454,7 +1505,38 @@ export default function WritingWorkspace() {
           )}
           <div className="ww-paper-stage">
             <article ref={paperRef} className="a4-paper" style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}>
+              {headerConfig.enabled && (
+                <div className={`ww-paper-header-banner align-${headerConfig.alignment || 'center'}`}>
+                  <span className="ww-header-tag">HEADER</span>
+                  <input
+                    className="ww-header-input"
+                    value={headerConfig.text}
+                    onChange={(e) => setHeaderConfig({ ...headerConfig, text: e.target.value })}
+                    placeholder="Type header text here..."
+                    aria-label="Header text"
+                  />
+                </div>
+              )}
+
               <EditorContent key={reportId || 'new'} editor={editor} />
+
+              {footerConfig.enabled && (
+                <div className={`ww-paper-footer-banner align-${footerConfig.alignment || 'right'}`}>
+                  <div className="ww-footer-content">
+                    <input
+                      className="ww-footer-input"
+                      value={footerConfig.text}
+                      onChange={(e) => setFooterConfig({ ...footerConfig, text: e.target.value })}
+                      placeholder="Type footer text here..."
+                      aria-label="Footer text"
+                    />
+                    {footerConfig.pageNumbering?.enabled && (
+                      <span className="ww-footer-pagenum">Page 1 of {pageCount || 1}</span>
+                    )}
+                  </div>
+                  <span className="ww-footer-tag">FOOTER</span>
+                </div>
+              )}
             </article>
           </div>
         </div>

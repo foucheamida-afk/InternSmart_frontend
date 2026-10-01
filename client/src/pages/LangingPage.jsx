@@ -201,9 +201,6 @@ function LandingPage() {
 
   return (
     <div className="landing-page">
-      <div className="parallax-orb" style={{ left: '8%', top: '10%', width: '420px', height: '420px', background: 'rgba(255,122,0,0.16)' }} />
-      <div className="parallax-orb" style={{ right: '10%', top: '18%', width: '380px', height: '380px', background: 'rgba(255,122,0,0.14)' }} />
-
       <header className="fixed inset-x-0 top-0 z-50">
         <nav
           className={`flex w-full items-center justify-between border-b px-4 py-3 backdrop-blur-md sm:px-6 lg:px-8 ${
@@ -377,35 +374,35 @@ function LandingPage() {
                 you need to work smarter, learn faster and achieve more.
               </p>
             </div>
+          </div>
 
-            <div className="carousel-wrap reveal">
-              <div className="carousel-track">
-                {[...featureCards, ...featureCards].map((item, index) => {
-                  const Icon = item.icon
-                  return (
-                    <article key={`${item.title}-${index}`} className="feature-card">
-                      <div className="feature-icon">
-                        <Icon />
-                      </div>
-                      <h3>{item.title}</h3>
-                      <p>{item.description}</p>
-                    </article>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className="carousel-wrap reverse reveal">
-              <div className="carousel-track">
-                {[...secondaryCards, ...secondaryCards].map((label, index) => (
-                  <div key={`${label}-${index}`} className="feature-card" style={{ width: '220px', minHeight: '120px' }}>
+          <div className="carousel-wrap">
+            <div className="carousel-track">
+              {[...featureCards, ...featureCards].map((item, index) => {
+                const Icon = item.icon
+                return (
+                  <article key={`${item.title}-${index}`} className="feature-card">
                     <div className="feature-icon">
-                      <FiArrowRight />
+                      <Icon />
                     </div>
-                    <h3>{label}</h3>
+                    <h3>{item.title}</h3>
+                    <p>{item.description}</p>
+                  </article>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="carousel-wrap reverse">
+            <div className="carousel-track">
+              {[...secondaryCards, ...secondaryCards].map((label, index) => (
+                <div key={`${label}-${index}`} className="feature-card" style={{ width: '220px', minHeight: '120px' }}>
+                  <div className="feature-icon">
+                    <FiArrowRight />
                   </div>
-                ))}
-              </div>
+                  <h3>{label}</h3>
+                </div>
+              ))}
             </div>
           </div>
         </section>

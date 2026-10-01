@@ -118,13 +118,17 @@ export default function AdminUsers() {
     }
   }
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this user?')) return
+  const handleDelete = async (u) => {
+    if (u.active) {
+      alert(`User "${u.name}" is currently active. Please deactivate the user before deleting.`)
+      return
+    }
+    if (!window.confirm(`Delete user "${u.name}"?`)) return
     try {
-      await adminApi.deleteUser(id)
-      setUsers(prev => prev.filter(u => u.id !== id))
-    } catch {
-      // error
+      await adminApi.deleteUser(u.id)
+      setUsers(prev => prev.filter(item => item.id !== u.id))
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to delete user.')
     }
   }
 
@@ -345,7 +349,7 @@ export default function AdminUsers() {
                         <Mail size={14} />
                       </button>
                       <button
-                        onClick={() => handleDelete(u.id)}
+                        onClick={() => handleDelete(u)}
                         className="p-1.5 rounded-lg transition cursor-pointer"
                         style={{ color: 'var(--text-muted)' }}
                         onMouseEnter={(e) => e.target.style.color = '#f87171'}

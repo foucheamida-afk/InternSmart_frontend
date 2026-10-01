@@ -58,93 +58,97 @@ const normalizeStudentProfile = (payload = {}) => {
   }
 }
 
+import { getStoredUser } from '../utils/storage'
+import { getDashboardCache, setDashboardCache } from '../utils/dashboardCache'
+
 export default function StudentDashboard() {
   const navigate = useNavigate()
   const { logout } = useAuth()
-  const [user, setUser] = useState(null)
-  const [loadingUser, setLoadingUser] = useState(true)
+
+  const cachedProfile = getDashboardCache('student_profile') || getStoredUser()
+  const cachedStats = getDashboardCache('student_stats')
+  const cachedNotifs = getDashboardCache('student_notifications')
+
+  const [user, setUser] = useState(() => cachedProfile ? normalizeStudentProfile(cachedProfile) : null)
+  const [loadingUser, setLoadingUser] = useState(() => !cachedProfile)
   const [userError, setUserError] = useState("")
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const [showProfileOverview, setShowProfileOverview] = useState(false)
-  const [stats, setStats] = useState(null)
-  const [loadingStats, setLoadingStats] = useState(true)
+
+  const [stats, setStats] = useState(() => cachedStats || null)
+  const [loadingStats, setLoadingStats] = useState(() => !cachedStats)
   const [statsError, setStatsError] = useState("")
-  const [notifications, setNotifications] = useState([])
-  const [loadingNotifications, setLoadingNotifications] = useState(true)
+
+  const [notifications, setNotifications] = useState(() => cachedNotifs || [])
+  const [loadingNotifications, setLoadingNotifications] = useState(() => !cachedNotifs)
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
-      const [statsResult, notificationsResult] = await Promise.allSettled([
+    let isMounted = true
+
+    const loadAllDashboardData = async () => {
+      // Fire all 3 calls concurrently (parallel) instead of a waterfall
+      const [profileRes, statsRes, notifsRes] = await Promise.allSettled([
+        api.get("/students/me"),
         api.get("/students/dashboard-stats"),
         api.get("/students/my-notifications"),
       ])
 
-      if (statsResult.status === "fulfilled") {
-        setStats(statsResult.value.data)
+      if (!isMounted) return
+
+      if (profileRes.status === "fulfilled") {
+        const norm = normalizeStudentProfile(profileRes.value.data)
+        setUser(norm)
+        setDashboardCache('student_profile', norm)
+        setUserError("")
+      } else if (profileRes.reason?.response?.status === 401) {
+        logout()
+        return
+      } else {
+        if (!user) setUserError(profileRes.reason?.response?.data?.message || "Unable to load student information")
+      }
+      setLoadingUser(false)
+
+      if (statsRes.status === "fulfilled") {
+        setStats(statsRes.value.data)
+        setDashboardCache('student_stats', statsRes.value.data)
         setStatsError("")
       } else {
-        console.error("Dashboard statistics error:", statsResult.reason)
-        setStatsError(
-          statsResult.reason.response?.data?.message ||
-          "Unable to load dashboard statistics"
-        )
+        if (!stats) setStatsError(statsRes.reason?.response?.data?.message || "Unable to load dashboard statistics")
       }
-
-      if (notificationsResult.status === "fulfilled") {
-        setNotifications(notificationsResult.value.data.notifications || [])
-      } else {
-        console.error("Dashboard notifications error:", notificationsResult.reason)
-      }
-
       setLoadingStats(false)
+
+      if (notifsRes.status === "fulfilled") {
+        const notifList = notifsRes.value.data.notifications || []
+        setNotifications(notifList)
+        setDashboardCache('student_notifications', notifList)
+      }
       setLoadingNotifications(false)
     }
 
-    if (user) {
-      fetchDashboardData()
-      const refreshInterval = window.setInterval(fetchDashboardData, 15000)
-      return () => window.clearInterval(refreshInterval)
+    loadAllDashboardData()
+
+    const refreshInterval = window.setInterval(loadAllDashboardData, 20000)
+    return () => {
+      isMounted = false
+      window.clearInterval(refreshInterval)
     }
-  }, [user])
+  }, [logout])
 
   const handleMarkNotificationRead = async (id) => {
     try {
       await api.put(`/students/notifications/${id}/read`)
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
-      )
+      setNotifications((prev) => {
+        const next = prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
+        setDashboardCache('student_notifications', next)
+        return next
+      })
     } catch (error) {
       console.error("Mark notification read error:", error)
     }
   }
-
-  useEffect(() => {
-    const fetchStudentProfile = async () => {
-      try {
-        const response = await api.get("/students/me")
-        setUser(normalizeStudentProfile(response.data))
-      } catch (error) {
-        console.error("FETCH STUDENT ERROR:", error)
-
-        if (error.response?.status === 401) {
-          logout()
-          return
-        }
-
-        setUserError(
-          error.response?.data?.message ||
-          "Unable to load student information"
-        )
-
-      } finally {
-        setLoadingUser(false)
-      }
-    }
-
-    fetchStudentProfile()
-  }, [logout, navigate])
 
   const handleSignOut = () => {
     logout()

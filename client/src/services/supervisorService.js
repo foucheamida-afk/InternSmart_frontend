@@ -5,6 +5,7 @@ export const supervisorApi = {
   getTasks: (params) => api.get("/supervisor/tasks", { params }).then(res => res.data),
   createTask: (data) => api.post("/supervisor/tasks", data).then(res => res.data),
   updateTask: (id, data) => api.put(`/supervisor/tasks/${id}`, data).then(res => res.data),
+  reviewTaskSubmission: (id, data) => api.put(`/supervisor/tasks/${id}/review`, data).then(res => res.data),
   deleteTask: (id) => api.delete(`/supervisor/tasks/${id}`).then(res => res.data),
   getMeetings: (params) => api.get("/supervisor/meetings", { params }).then(res => res.data),
   createMeeting: (data) => api.post("/supervisor/meetings", data).then(res => res.data),

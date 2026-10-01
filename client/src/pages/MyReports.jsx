@@ -1283,10 +1283,9 @@ export default function MyReports() {
     })
     setSelectedReportId(newReport.id)
 
-    // Either format opens straight into its workspace: Word into the writing
-    // workspace, a PDF into the PDF workspace where its text becomes editable.
-    setNotice('')
-    openWorkspace(newReport)
+    // When a report (PDF or Word) is uploaded, do not automatically open the editing environment.
+    // Display it on the report page first so the student can decide when to open it.
+    setNotice(`"${newReport.title || newReport.fileName}" uploaded successfully. It is now listed in your reports below, where you can choose when to open the editing workspace.`)
   }
 
   const handleDeleteReport = async (id) => {
@@ -1316,14 +1315,19 @@ export default function MyReports() {
     setError('')
     try {
       const token = getStoredToken()
-      const response = await fetch(`${API_BASE}/students/reports/${id}/send-to-supervisor?type=${type}`, {
+      const response = await fetch(`${API_BASE}/students/reports/${id}/send-to-supervisor`, {
         method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ type }),
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.message || 'Unable to send report to supervisor')
 
       setReports((prev) => prev.map((r) => (r.id === id ? normalizeReport(data.report) : r)))
+      setNotice(data.message || `Report sent to your ${type} supervisor for review.`)
       setSupervisorModal({ open: false, reportId: null, type: 'academic' })
     } catch (err) {
       setError(err.message || 'Unable to send report to supervisor. Please try again.')
@@ -1657,12 +1661,23 @@ export default function MyReports() {
                 color: 'var(--text)'
               }}
             >
-              <div className="mb-4">
-                <p className="text-[11px] uppercase tracking-[0.2em]" style={{ color: 'var(--orange-3)' }}>Send to Supervisor</p>
-                <h3 className="mt-2 text-xl font-semibold">Choose supervisor type</h3>
-                <p className="mt-2 text-sm" style={{ color: 'var(--text-soft)' }}>
-                  Select which supervisor should review this report.
-                </p>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.2em]" style={{ color: 'var(--orange-3)' }}>Send to Supervisor</p>
+                  <h3 className="mt-2 text-xl font-semibold">Choose supervisor type</h3>
+                  <p className="mt-2 text-sm" style={{ color: 'var(--text-soft)' }}>
+                    Select which supervisor should review this report.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSupervisorModal({ open: false, reportId: null, type: 'academic' })}
+                  className="rounded-full border p-2 transition cursor-pointer hover:bg-white/10 shrink-0 ml-2"
+                  style={{ borderColor: 'var(--line)', color: 'var(--text-muted)' }}
+                  title="Close modal"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
 
               <div className="mt-6 grid gap-3">

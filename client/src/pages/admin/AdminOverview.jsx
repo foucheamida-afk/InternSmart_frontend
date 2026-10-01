@@ -152,10 +152,13 @@ function SimpleBarChart({ data, metric }) {
   )
 }
 
+import { getDashboardCache, setDashboardCache } from '../../utils/dashboardCache'
+
 export default function AdminOverview() {
   const navigate = useNavigate()
-  const [stats, setStats] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const cachedStats = getDashboardCache('admin_overview_stats')
+  const [stats, setStats] = useState(() => cachedStats || null)
+  const [loading, setLoading] = useState(() => !cachedStats)
   const [chartData, setChartData] = useState([])
   const [chartLoading, setChartLoading] = useState(true)
   const [metric, setMetric] = useState('reports')
@@ -165,9 +168,14 @@ export default function AdminOverview() {
     adminApi.getDashboardStats()
       .then(data => {
         setStats(data)
+        setDashboardCache('admin_overview_stats', data)
         setLoading(false)
       })
-      .catch(() => setLoading(false))
+      .catch((err) => {
+        console.error("Admin dashboard stats error:", err)
+        if (!stats) setStats({ totalStudents: 0, totalSupervisors: 0, totalInternships: 0, defenseAlerts: 0 })
+        setLoading(false)
+      })
   }, [])
 
   useEffect(() => {

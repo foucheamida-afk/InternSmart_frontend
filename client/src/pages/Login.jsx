@@ -14,7 +14,7 @@ import { useAuth } from "../context/AuthContext";
 
 const Login = () => {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, user, token } = useAuth();
 
   // =========================
   // FORM STATE
@@ -29,6 +29,34 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState("");
   const initializedRef = useRef(false);
+
+  // Auto-redirect if already logged in
+  useEffect(() => {
+    if (user && token && user.role) {
+      if (user.requiresPasswordChange) {
+        navigate("/change-password", { replace: true });
+      } else if (user.requiresOnboarding) {
+        navigate("/onboarding", { replace: true });
+      } else {
+        switch (user.role) {
+          case "student":
+            navigate("/student/dashboard", { replace: true });
+            break;
+          case "academic_supervisor":
+            navigate("/supervisor", { replace: true });
+            break;
+          case "professional_supervisor":
+            navigate("/professional-supervisor", { replace: true });
+            break;
+          case "admin":
+            navigate("/admin", { replace: true });
+            break;
+          default:
+            break;
+        }
+      }
+    }
+  }, [user, token, navigate]);
 
   // Clear errors on mount
   useEffect(() => {

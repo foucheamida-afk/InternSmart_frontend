@@ -167,9 +167,7 @@ export default function Sidebar({ isOpen, onToggle, activeTab, onSelectTab }) {
       { icon: UserRound, label: 'Students', path: '/admin/students', active: location.pathname.startsWith('/admin/students') },
       { icon: Shield, label: 'Supervisors', path: '/admin/supervisors', active: location.pathname.startsWith('/admin/supervisors') },
       { icon: Briefcase, label: 'Internships', path: '/admin/internships', active: location.pathname.startsWith('/admin/internships') },
-      { icon: CalendarClock, label: 'Timeline', path: '/admin/timeline', active: location.pathname.startsWith('/admin/timeline') },
       { icon: BrainCircuit, label: 'AI Analysis', path: '/admin/ai-analysis', active: location.pathname.startsWith('/admin/ai-analysis') },
-      { icon: AlertTriangle, label: 'Defense Alerts', path: '/admin/defense-alerts', active: location.pathname.startsWith('/admin/defense-alerts') },
       { icon: Bell, label: 'Notifications', path: '/admin/notifications', active: location.pathname.startsWith('/admin/notifications') },
       { icon: Library, label: 'Report Library', path: '/library', active: location.pathname === '/library' },
       { icon: Settings, label: 'Settings', path: '/admin/settings', active: location.pathname.startsWith('/admin/settings') },
@@ -268,20 +266,7 @@ export default function Sidebar({ isOpen, onToggle, activeTab, onSelectTab }) {
           </button>
         </div>
 
-        {/* User Profile Badge */}
-        <div className="mt-auto pt-3 border-t border-[var(--line)]">
-          <div className="flex items-center gap-3 p-2.5 rounded-xl bg-white/5 border border-[var(--line)]">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#F5A623] font-bold text-white shadow-sm">
-              {user?.name?.charAt(0)?.toUpperCase() || 'U'}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-bold text-[var(--text)]">{user?.name || 'Logged User'}</p>
-              <p className="truncate text-[10px] capitalize text-[var(--text-muted)]">
-                {user?.role?.replace('_', ' ') || 'Member'}
-              </p>
-            </div>
-          </div>
-        </div>
+
       </aside>
     </>
   )

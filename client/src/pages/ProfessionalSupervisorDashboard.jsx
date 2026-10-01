@@ -19,16 +19,24 @@ import InspectSubmissionModal from '../components/dashboard/InspectSubmissionMod
 import { useAuth } from '../context/AuthContext'
 import { getStoredToken, getStoredUser } from '../utils/storage'
 
+import { getDashboardCache, setDashboardCache } from '../utils/dashboardCache'
+
 export default function ProfessionalSupervisorDashboard() {
   const navigate = useNavigate()
   const { logout } = useAuth()
-  const [supervisor, setSupervisor] = useState({ name: '', email: '', role: '' })
-  const [interns, setInterns] = useState([])
-  const [tasks, setTasks] = useState([])
-  const [stats, setStats] = useState({
+
+  const cachedData = getDashboardCache('prof_supervisor_dashboard')
+
+  const [supervisor, setSupervisor] = useState(() => {
+    const stored = getStoredUser()
+    return stored ? { name: stored.name, email: stored.email, role: stored.role } : { name: '', email: '', role: '' }
+  })
+  const [interns, setInterns] = useState(() => cachedData?.interns || [])
+  const [tasks, setTasks] = useState(() => cachedData?.tasks || [])
+  const [stats, setStats] = useState(() => cachedData?.stats || {
     totalInterns: 0, totalTasks: 0, pendingTasks: 0, completedTasks: 0, avgProgress: 0,
   })
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => !cachedData)
   const [error, setError] = useState('')
   const [activeTab, setActiveTab] = useState('interns')
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -47,7 +55,7 @@ export default function ProfessionalSupervisorDashboard() {
   const [newTask, setNewTask] = useState({ studentId: '', title: '', description: '', dueDate: '' })
 
   // Meetings state
-  const [meetings, setMeetings] = useState([])
+  const [meetings, setMeetings] = useState(() => cachedData?.meetings || [])
   const [isScheduleMeetingOpen, setIsScheduleMeetingOpen] = useState(false)
   const [activeCallMeeting, setActiveCallMeeting] = useState(null)
   const [newMeeting, setNewMeeting] = useState({
@@ -65,25 +73,39 @@ export default function ProfessionalSupervisorDashboard() {
 
   useEffect(() => { fetchDashboardData() }, [])
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (showSpinner = false) => {
     try {
-      setLoading(true)
+      if (showSpinner || !cachedData) {
+        setLoading(true)
+      }
       const [internsRes, tasksRes, statsRes, meetingsRes] = await Promise.all([
-        professionalSupervisorApi.getMyInterns(),
-        professionalSupervisorApi.getTasks(),
-        professionalSupervisorApi.getStats(),
+        professionalSupervisorApi.getMyInterns().catch(() => ({ interns: [], total: 0 })),
+        professionalSupervisorApi.getTasks().catch(() => ({ tasks: [], total: 0 })),
+        professionalSupervisorApi.getStats().catch(() => ({ totalInterns: 0, totalTasks: 0, pendingTasks: 0, completedTasks: 0, avgProgress: 0 })),
         professionalSupervisorApi.getMeetings().catch(() => ({ meetings: [] })),
       ])
 
-      setInterns(internsRes.interns || [])
-      setTasks(tasksRes.tasks || [])
-      setMeetings(meetingsRes.meetings || [])
-      setStats({
+      const fetchedInterns = internsRes.interns || []
+      const fetchedTasks = tasksRes.tasks || []
+      const fetchedMeetings = meetingsRes.meetings || []
+      const computedStats = {
         totalInterns: statsRes.totalInterns || 0,
         totalTasks: statsRes.totalTasks || 0,
         pendingTasks: statsRes.pendingTasks || 0,
         completedTasks: statsRes.completedTasks || 0,
         avgProgress: statsRes.avgProgress || 0,
+      }
+
+      setInterns(fetchedInterns)
+      setTasks(fetchedTasks)
+      setMeetings(fetchedMeetings)
+      setStats(computedStats)
+
+      setDashboardCache('prof_supervisor_dashboard', {
+        interns: fetchedInterns,
+        tasks: fetchedTasks,
+        meetings: fetchedMeetings,
+        stats: computedStats,
       })
 
       const storedUser = getStoredUser()
@@ -93,24 +115,10 @@ export default function ProfessionalSupervisorDashboard() {
           email: storedUser.email,
           role: storedUser.role,
         })
-      } else {
-        const token = getStoredToken()
-        if (token) {
-          try {
-            const payload = JSON.parse(atob(token.split('.')[1]))
-            setSupervisor({
-              name: payload.name || 'Professional Supervisor',
-              email: payload.email,
-              role: payload.role,
-            })
-          } catch {
-            // ignore
-          }
-        }
       }
     } catch (err) {
       console.error('Fetch dashboard error:', err)
-      setError('Unable to load dashboard data')
+      if (!interns.length) setError('Unable to load dashboard data')
     } finally {
       setLoading(false)
     }
@@ -136,9 +144,10 @@ export default function ProfessionalSupervisorDashboard() {
     } catch (err) { console.error('Update task error:', err) }
   }
 
-  const handleReviewTaskSubmission = async (taskId, status, feedback) => {
+  const handleReviewTaskSubmission = async (taskId, reviewData, legacyFeedback) => {
     try {
-      await professionalSupervisorApi.updateTask(taskId, { status, feedback })
+      const payload = typeof reviewData === 'object' ? reviewData : { status: reviewData, feedback: legacyFeedback }
+      await professionalSupervisorApi.reviewTaskSubmission(taskId, payload)
       setInspectingTask(null)
       fetchDashboardData()
     } catch (err) {
@@ -1174,6 +1183,65 @@ export default function ProfessionalSupervisorDashboard() {
                       style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)', color: 'var(--text)' }}
                     />
                   </div>
+
+                  {/* Milestones Section */}
+                  <div className="space-y-2 pt-2 border-t" style={{ borderColor: 'var(--line)' }}>
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                        Task Milestones (Optional)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setNewTask((prev) => ({
+                          ...prev,
+                          milestones: [...(prev.milestones || []), { title: '', description: '', dueDate: '' }]
+                        }))}
+                        className="text-xs font-semibold text-emerald-400 hover:underline flex items-center gap-1"
+                      >
+                        + Add Milestone
+                      </button>
+                    </div>
+
+                    {(newTask.milestones || []).map((m, idx) => (
+                      <div key={idx} className="p-3 rounded-xl border space-y-2 relative" style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)' }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <input
+                            placeholder={`Milestone #${idx + 1} Title`}
+                            value={m.title}
+                            onChange={(e) => {
+                              const list = [...(newTask.milestones || [])]
+                              list[idx].title = e.target.value
+                              setNewTask({ ...newTask, milestones: list })
+                            }}
+                            className="flex-1 rounded-lg border px-2.5 py-1.5 text-xs focus:outline-none"
+                            style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const list = (newTask.milestones || []).filter((_, i) => i !== idx)
+                              setNewTask({ ...newTask, milestones: list })
+                            }}
+                            className="p-1 text-rose-400 hover:bg-rose-500/10 rounded"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                        <input
+                          placeholder="Milestone description (optional)"
+                          value={m.description || ''}
+                          onChange={(e) => {
+                            const list = [...(newTask.milestones || [])]
+                            list[idx].description = e.target.value
+                            setNewTask({ ...newTask, milestones: list })
+                          }}
+                          className="w-full rounded-lg border px-2.5 py-1 text-xs focus:outline-none"
+                          style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
                   <div className="flex gap-3 pt-2">
                     <button
                       type="submit"

@@ -1,10 +1,13 @@
 import React, { useState } from 'react'
-import { X, CheckCircle2, RotateCcw, ExternalLink, Clock, FileText, Loader2 } from 'lucide-react'
+import { X, CheckCircle2, RotateCcw, ExternalLink, Clock, FileText, Loader2, Star, Check } from 'lucide-react'
 
 export default function InspectSubmissionModal({ task, intern, onClose, onReviewComplete }) {
   const [feedback, setFeedback] = useState(task.feedbackAcademic || task.feedbackProfessional || task.feedback || '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [selectedMilestoneId, setSelectedMilestoneId] = useState(null)
+
+  const milestones = Array.isArray(task.milestones) ? task.milestones : []
 
   const handleAction = async (status) => {
     if (status === 'needs_revision' && !feedback.trim()) {
@@ -14,11 +17,17 @@ export default function InspectSubmissionModal({ task, intern, onClose, onReview
     setSubmitting(true)
     setError('')
     try {
-      await onReviewComplete(task.id, status, feedback)
+      const payload = {
+        status,
+        feedback,
+        milestoneId: selectedMilestoneId,
+        milestoneStatus: status === 'completed' || status === 'approved' ? 'approved' : 'needs_revision',
+      }
+      await onReviewComplete(task.id, payload)
       onClose()
     } catch (err) {
       console.error('Review error:', err)
-      setError('Failed to update task status')
+      setError('Failed to update task review status')
     } finally {
       setSubmitting(false)
     }
@@ -37,8 +46,13 @@ export default function InspectSubmissionModal({ task, intern, onClose, onReview
           <div className="flex-1 min-w-0 pr-4">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30">
-                Submitted Task Review
+                Task Submission Review
               </span>
+              {task.supervisorRoleLabel && (
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-orange-500/15 text-orange-400 border border-orange-500/30">
+                  {task.supervisorRoleLabel}
+                </span>
+              )}
             </div>
             <h2 className="text-lg font-bold leading-tight" style={{ color: 'var(--text)' }}>
               {task.title}
@@ -72,11 +86,46 @@ export default function InspectSubmissionModal({ task, intern, onClose, onReview
             </div>
           </div>
 
-          {/* Description */}
+          {/* Task Requirements */}
           {task.description && (
             <div>
               <h4 className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Task Requirements</h4>
               <p className="text-xs leading-relaxed" style={{ color: 'var(--text-soft)' }}>{task.description}</p>
+            </div>
+          )}
+
+          {/* Milestones if present */}
+          {milestones.length > 0 && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Task Milestones & Progress</h4>
+              <div className="space-y-2">
+                {milestones.map((m) => (
+                  <div
+                    key={m.id}
+                    onClick={() => setSelectedMilestoneId(selectedMilestoneId === m.id ? null : m.id)}
+                    className={`p-3 rounded-xl border transition cursor-pointer flex items-center justify-between ${
+                      selectedMilestoneId === m.id ? 'border-orange-500 bg-orange-500/10' : 'border-line'
+                    }`}
+                    style={{ backgroundColor: selectedMilestoneId === m.id ? undefined : 'var(--bg)' }}
+                  >
+                    <div>
+                      <p className="text-xs font-bold" style={{ color: 'var(--text)' }}>{m.title}</p>
+                      {m.description && <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{m.description}</p>}
+                    </div>
+                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                      m.status === 'approved' || m.status === 'completed' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' :
+                      m.status === 'submitted' ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30' :
+                      m.status === 'needs_revision' ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30' :
+                      'bg-gray-500/15 text-gray-400 border border-gray-500/30'
+                    }`}>
+                      {m.status || 'Pending'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] italic" style={{ color: 'var(--text-muted)' }}>
+                {selectedMilestoneId ? `Selected Milestone #${selectedMilestoneId} for review.` : 'Reviewing overall task submission.'}
+              </p>
             </div>
           )}
 
@@ -111,12 +160,12 @@ export default function InspectSubmissionModal({ task, intern, onClose, onReview
           {/* Supervisor Feedback Form */}
           <div className="space-y-2 pt-2 border-t" style={{ borderColor: 'var(--line)' }}>
             <label className="block text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-              Review Feedback & Instructions <span style={{ fontWeight: 400 }}>(Optional for approval, required for revision)</span>
+              Review Feedback & Comments <span style={{ fontWeight: 400 }}>(Optional for approval, required for revision)</span>
             </label>
             <textarea
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
-              placeholder="Write feedback, guidance, or instructions for revision..."
+              placeholder="Write constructive feedback, guidance, or revision requirements for the student..."
               rows={3}
               className="w-full rounded-xl border px-3 py-2.5 text-sm focus:outline-none resize-none"
               style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)', color: 'var(--text)' }}
@@ -142,7 +191,7 @@ export default function InspectSubmissionModal({ task, intern, onClose, onReview
             className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 transition cursor-pointer disabled:opacity-50 shadow-lg"
           >
             {submitting ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-            Approve & Complete
+            {selectedMilestoneId ? 'Approve Milestone' : 'Approve & Complete Task'}
           </button>
         </div>
       </div>

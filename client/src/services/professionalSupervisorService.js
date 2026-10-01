@@ -5,6 +5,7 @@ export const professionalSupervisorApi = {
   getTasks: (params) => api.get("/professional-supervisor/tasks", { params }).then(res => res.data),
   createTask: (data) => api.post("/professional-supervisor/tasks", data).then(res => res.data),
   updateTask: (id, data) => api.put(`/professional-supervisor/tasks/${id}`, data).then(res => res.data),
+  reviewTaskSubmission: (id, data) => api.put(`/professional-supervisor/tasks/${id}/review`, data).then(res => res.data),
   deleteTask: (id) => api.delete(`/professional-supervisor/tasks/${id}`).then(res => res.data),
   submitFeedback: (id, data) => api.put(`/professional-supervisor/tasks/${id}/feedback`, data).then(res => res.data),
   getStats: () => api.get("/professional-supervisor/stats").then(res => res.data),

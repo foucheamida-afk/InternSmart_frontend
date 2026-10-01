@@ -183,6 +183,10 @@ export default function AdminStudents() {
   const handleDeleteStudent = async (student) => {
     const userId = student.user?.id
     if (!userId) return
+    if (student.user?.active) {
+      alert(`Student account for "${student.user?.name || 'this student'}" is currently active. Please deactivate the user before deleting.`)
+      return
+    }
     if (!window.confirm(`Are you sure you want to delete student "${student.user?.name || 'this student'}"? This will remove them everywhere in the app.`)) return
     try {
       await adminApi.deleteUser(userId)

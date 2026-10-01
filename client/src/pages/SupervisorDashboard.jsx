@@ -183,19 +183,26 @@ const GradingTab = ({ interns }) => {
   )
 }
 
+import { getDashboardCache, setDashboardCache } from '../utils/dashboardCache'
+
 export default function SupervisorDashboard() {
   const navigate = useNavigate()
   const { logout } = useAuth()
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('interns')
-  const [loading, setLoading] = useState(true)
+
+  const cachedData = getDashboardCache('supervisor_dashboard')
+  const [loading, setLoading] = useState(() => !cachedData)
   const [error, setError] = useState('')
 
-  const [supervisor, setSupervisor] = useState(null)
-  const [interns, setInterns] = useState([])
-  const [tasks, setTasks] = useState([])
-  const [stats, setStats] = useState({
+  const [supervisor, setSupervisor] = useState(() => {
+    const stored = getStoredUser()
+    return stored ? { name: stored.name, email: stored.email, role: stored.role } : null
+  })
+  const [interns, setInterns] = useState(() => cachedData?.interns || [])
+  const [tasks, setTasks] = useState(() => cachedData?.tasks || [])
+  const [stats, setStats] = useState(() => cachedData?.stats || {
     totalInterns: 0, totalTasks: 0, pendingTasks: 0, completedTasks: 0, avgProgress: 0,
   })
 
@@ -227,29 +234,40 @@ export default function SupervisorDashboard() {
 
   useEffect(() => { fetchDashboardData() }, [])
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (showSpinner = false) => {
     try {
-      setLoading(true)
+      if (showSpinner || !cachedData) {
+        setLoading(true)
+      }
       const [internsRes, tasksRes] = await Promise.all([
-        supervisorApi.getMyInterns(),
-        supervisorApi.getTasks(),
+        supervisorApi.getMyInterns().catch(() => ({ interns: [], total: 0 })),
+        supervisorApi.getTasks().catch(() => ({ tasks: [], total: 0 })),
       ])
 
-      setInterns(internsRes.interns || [])
-      setTasks(tasksRes.tasks || [])
+      const fetchedInterns = internsRes.interns || []
+      const fetchedTasks = tasksRes.tasks || []
 
-      const allTasks = tasksRes.tasks || []
-      const totalTasks = allTasks.length
-      const completedTasks = allTasks.filter(t => t.completed || t.status === 'completed').length
-      const pendingTasks = allTasks.filter(t => !t.completed && t.status !== 'completed').length
-      const avgProgress = totalTasks > 0 ? Math.round(allTasks.reduce((sum, t) => sum + (t.progress || 0), 0) / totalTasks) : 0
+      setInterns(fetchedInterns)
+      setTasks(fetchedTasks)
 
-      setStats({
+      const totalTasks = fetchedTasks.length
+      const completedTasks = fetchedTasks.filter(t => t.completed || t.status === 'completed').length
+      const pendingTasks = fetchedTasks.filter(t => !t.completed && t.status !== 'completed').length
+      const avgProgress = totalTasks > 0 ? Math.round(fetchedTasks.reduce((sum, t) => sum + (t.progress || 0), 0) / totalTasks) : 0
+
+      const computedStats = {
         totalInterns: internsRes.total || 0,
         totalTasks,
         pendingTasks,
         completedTasks,
         avgProgress,
+      }
+      setStats(computedStats)
+
+      setDashboardCache('supervisor_dashboard', {
+        interns: fetchedInterns,
+        tasks: fetchedTasks,
+        stats: computedStats,
       })
 
       const storedUser = getStoredUser()
@@ -259,24 +277,10 @@ export default function SupervisorDashboard() {
           email: storedUser.email,
           role: storedUser.role,
         })
-      } else {
-        const token = getStoredToken()
-        if (token) {
-          try {
-            const payload = JSON.parse(atob(token.split('.')[1]))
-            setSupervisor({
-              name: payload.name || 'Supervisor',
-              email: payload.email,
-              role: payload.role,
-            })
-          } catch {
-            // ignore
-          }
-        }
       }
     } catch (err) {
       console.error('Fetch dashboard error:', err)
-      setError('Unable to load dashboard data')
+      if (!interns.length) setError('Unable to load dashboard data')
     } finally {
       setLoading(false)
     }
@@ -302,9 +306,10 @@ export default function SupervisorDashboard() {
     } catch (err) { console.error('Update task error:', err) }
   }
 
-  const handleReviewTaskSubmission = async (taskId, status, feedback) => {
+  const handleReviewTaskSubmission = async (taskId, reviewData, legacyFeedback) => {
     try {
-      await supervisorApi.updateTask(taskId, { status, feedback })
+      const payload = typeof reviewData === 'object' ? reviewData : { status: reviewData, feedback: legacyFeedback }
+      await supervisorApi.reviewTaskSubmission(taskId, payload)
       setInspectingTask(null)
       fetchDashboardData()
     } catch (err) {
@@ -954,6 +959,65 @@ export default function SupervisorDashboard() {
                       style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)', color: 'var(--text)' }}
                     />
                   </div>
+
+                  {/* Milestones Section */}
+                  <div className="space-y-2 pt-2 border-t" style={{ borderColor: 'var(--line)' }}>
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                        Task Milestones (Optional)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setNewTask((prev) => ({
+                          ...prev,
+                          milestones: [...(prev.milestones || []), { title: '', description: '', dueDate: '' }]
+                        }))}
+                        className="text-xs font-semibold text-orange-400 hover:underline flex items-center gap-1"
+                      >
+                        + Add Milestone
+                      </button>
+                    </div>
+
+                    {(newTask.milestones || []).map((m, idx) => (
+                      <div key={idx} className="p-3 rounded-xl border space-y-2 relative" style={{ backgroundColor: 'var(--bg)', borderColor: 'var(--line)' }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <input
+                            placeholder={`Milestone #${idx + 1} Title`}
+                            value={m.title}
+                            onChange={(e) => {
+                              const list = [...(newTask.milestones || [])]
+                              list[idx].title = e.target.value
+                              setNewTask({ ...newTask, milestones: list })
+                            }}
+                            className="flex-1 rounded-lg border px-2.5 py-1.5 text-xs focus:outline-none"
+                            style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const list = (newTask.milestones || []).filter((_, i) => i !== idx)
+                              setNewTask({ ...newTask, milestones: list })
+                            }}
+                            className="p-1 text-rose-400 hover:bg-rose-500/10 rounded"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                        <input
+                          placeholder="Milestone description (optional)"
+                          value={m.description || ''}
+                          onChange={(e) => {
+                            const list = [...(newTask.milestones || [])]
+                            list[idx].description = e.target.value
+                            setNewTask({ ...newTask, milestones: list })
+                          }}
+                          className="w-full rounded-lg border px-2.5 py-1 text-xs focus:outline-none"
+                          style={{ backgroundColor: 'var(--bg-panel)', borderColor: 'var(--line)', color: 'var(--text)' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
                   <div className="flex gap-3 pt-2">
                     <button
                       type="submit"

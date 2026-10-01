@@ -46,6 +46,10 @@ export default function AdminSupervisors() {
 
   const handleDeleteSupervisor = async (supervisor) => {
     if (!supervisor.id) return
+    if (supervisor.active) {
+      alert(`Supervisor "${supervisor.name}" is currently active. Please deactivate the user account before deleting.`)
+      return
+    }
     if (!window.confirm(`Are you sure you want to delete supervisor "${supervisor.name}"? This will remove them everywhere in the app.`)) return
     try {
       await adminApi.deleteUser(supervisor.id)

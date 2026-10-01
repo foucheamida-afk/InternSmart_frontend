@@ -256,7 +256,7 @@ a {
   color: rgba(30, 41, 59, 0.5);
 }
 
-[data-theme="light"] .timeline-row + .timeline-row {
+[data-theme="light"] .timeline-row+.timeline-row {
   border-top: 1px solid rgba(0, 0, 0, 0.04);
 }
 
@@ -474,9 +474,10 @@ a {
   transform: translateY(-1px);
 }
 
-.hero {
+.hero.section {
   position: relative;
-  padding: 92px 0 72px;
+  padding-top: 160px;
+  padding-bottom: 72px;
 }
 
 .hero-shell {
@@ -674,7 +675,9 @@ a {
   background: rgba(255, 255, 255, 0.25);
 }
 
-.window-actions span:first-child { background: rgba(255, 122, 0, 0.9); }
+.window-actions span:first-child {
+  background: rgba(255, 122, 0, 0.9);
+}
 
 .dashboard-body {
   display: grid;
@@ -740,7 +743,8 @@ a {
 }
 
 .main-panel {
-  /* padding: 12px 12px 12px 0; */
+  flex: 1;
+  min-width: 0;
 }
 
 .summary-grid {
@@ -789,7 +793,7 @@ a {
   padding: 8px 0;
 }
 
-.timeline-row + .timeline-row {
+.timeline-row+.timeline-row {
   border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 
@@ -875,9 +879,12 @@ a {
 
 .carousel-wrap {
   position: relative;
+  width: 100%;
   margin-top: 36px;
   overflow: hidden;
   padding: 12px 0 18px;
+  opacity: 1;
+  visibility: visible;
 }
 
 .carousel-track {
@@ -1122,11 +1129,25 @@ a {
   animation: fillBar 1.4s ease forwards;
 }
 
-.bar-row:nth-child(1) .bar-fill { animation-delay: 0.1s; }
-.bar-row:nth-child(2) .bar-fill { animation-delay: 0.2s; }
-.bar-row:nth-child(3) .bar-fill { animation-delay: 0.3s; }
-.bar-row:nth-child(4) .bar-fill { animation-delay: 0.4s; }
-.bar-row:nth-child(5) .bar-fill { animation-delay: 0.5s; }
+.bar-row:nth-child(1) .bar-fill {
+  animation-delay: 0.1s;
+}
+
+.bar-row:nth-child(2) .bar-fill {
+  animation-delay: 0.2s;
+}
+
+.bar-row:nth-child(3) .bar-fill {
+  animation-delay: 0.3s;
+}
+
+.bar-row:nth-child(4) .bar-fill {
+  animation-delay: 0.4s;
+}
+
+.bar-row:nth-child(5) .bar-fill {
+  animation-delay: 0.5s;
+}
 
 .steps-section {
   padding-top: 24px;
@@ -1256,9 +1277,20 @@ a {
   transition: transform 0.3s ease, border-color 0.3s ease;
 }
 
-.testimonial-card.left { transform: translateX(-60px); opacity: 0; }
-.testimonial-card.center { transform: translateY(60px); opacity: 0; }
-.testimonial-card.right { transform: translateX(60px); opacity: 0; }
+.testimonial-card.left {
+  transform: translateX(-60px);
+  opacity: 0;
+}
+
+.testimonial-card.center {
+  transform: translateY(60px);
+  opacity: 0;
+}
+
+.testimonial-card.right {
+  transform: translateX(60px);
+  opacity: 0;
+}
 
 .testimonial-card.is-visible {
   transform: translate(0, 0);
@@ -1329,7 +1361,7 @@ a {
   pointer-events: none;
 }
 
-.cta-box > * {
+.cta-box>* {
   position: relative;
   z-index: 1;
 }
@@ -1473,27 +1505,32 @@ a {
   from {
     transform: translateX(0);
   }
+
   to {
     transform: translateX(-50%);
   }
 }
 
 @keyframes dashboardFloat {
+
   0%,
   100% {
     transform: translateY(0) rotateX(0deg) rotateY(0deg);
   }
+
   50% {
     transform: translateY(-8px) rotateX(0.6deg) rotateY(0.4deg);
   }
 }
 
 @keyframes glowPulse {
+
   0%,
   100% {
     transform: translate(-10%, 10%) scale(1);
     opacity: 0.8;
   }
+
   50% {
     transform: translate(-5%, 4%) scale(1.08);
     opacity: 1;
@@ -1501,20 +1538,24 @@ a {
 }
 
 @keyframes scrollPulse {
+
   0%,
   100% {
     opacity: 0.7;
   }
+
   50% {
     opacity: 1;
   }
 }
 
 @keyframes bounceY {
+
   0%,
   100% {
     transform: translateY(0);
   }
+
   50% {
     transform: translateY(4px);
   }
@@ -1524,6 +1565,7 @@ a {
   0% {
     transform: translate3d(-6%, 4%, 0) scale(1);
   }
+
   100% {
     transform: translate3d(3%, -3%, 0) scale(1.08);
   }
@@ -1533,6 +1575,7 @@ a {
   from {
     width: 0;
   }
+
   to {
     width: var(--final-width);
   }

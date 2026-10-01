@@ -15,34 +15,58 @@ import Login from './pages/Login'
 // TipTap editor stack before seeing anything. Route-level splitting means each
 // role fetches only the pages it can actually reach. Roles are enforced by
 // ProtectedRoute, so this is a loading concern, not a security boundary.
-const StudentDashboard = lazy(() => import('./pages/StudentDashboard'))
-const MyReports = lazy(() => import('./pages/MyReports'))
-const AIFeedback = lazy(() => import('./pages/AIFeedback'))
-const SupervisorDashboard = lazy(() => import('./pages/SupervisorDashboard'))
-const SupervisorReviews = lazy(() => import('./pages/SupervisorReviews'))
-const ReportLibrary = lazy(() => import('./pages/ReportLibrary'))
-const ReportAnalysis = lazy(() => import('./pages/ReportAnalysis'))
-const ProfessionalSupervisorDashboard = lazy(() => import('./pages/ProfessionalSupervisorDashboard'))
-const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))
-const AdminOverview = lazy(() => import('./pages/admin/AdminOverview'))
-const AdminUsers = lazy(() => import('./pages/admin/AdminUsers'))
-const AdminStudents = lazy(() => import('./pages/admin/AdminStudents'))
-const AdminSupervisors = lazy(() => import('./pages/admin/AdminSupervisors'))
-const AdminInternships = lazy(() => import('./pages/admin/AdminInternships'))
-const AdminTimeline = lazy(() => import('./pages/admin/AdminTimeline'))
-const AdminReports = lazy(() => import('./pages/admin/AdminReports'))
-const AdminAIAnalysis = lazy(() => import('./pages/admin/AdminAIAnalysis'))
-const AdminMeetings = lazy(() => import('./pages/admin/AdminMeetings'))
-const AdminDefenseAlerts = lazy(() => import('./pages/admin/AdminDefenseAlerts'))
-const AdminNotifications = lazy(() => import('./pages/admin/AdminNotifications'))
-const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'))
-const MySupervisors = lazy(() => import('./pages/MySupervisors'))
-const Settings = lazy(() => import('./pages/Settings'))
-const ChangePassword = lazy(() => import('./pages/ChangePassword'))
-const ForgotPassword = lazy(() => import('./pages/ForgotPassword'))
-const Onboarding = lazy(() => import('./pages/Onboarding'))
-const WritingWorkspace = lazy(() => import('./pages/WritingWorkspace'))
-const PdfWorkspace = lazy(() => import('./pages/PdfWorkspace'))
+// Helper for safe lazy loading with retry on connection error / server restart
+const safeLazy = (importFn) =>
+  lazy(async () => {
+    try {
+      const module = await importFn()
+      sessionStorage.removeItem('retry-lazy-reload')
+      return module
+    } catch (error) {
+      console.error('Dynamic import error:', error)
+      const reloaded = sessionStorage.getItem('retry-lazy-reload')
+      if (!reloaded) {
+        sessionStorage.setItem('retry-lazy-reload', 'true')
+        window.location.reload()
+        return new Promise((resolve, reject) => {
+          setTimeout(() => {
+            importFn().then(resolve).catch(reject)
+          }, 1000)
+        })
+      }
+      sessionStorage.removeItem('retry-lazy-reload')
+      throw error
+    }
+  })
+
+const StudentDashboard = safeLazy(() => import('./pages/StudentDashboard'))
+const MyReports = safeLazy(() => import('./pages/MyReports'))
+const AIFeedback = safeLazy(() => import('./pages/AIFeedback'))
+const SupervisorDashboard = safeLazy(() => import('./pages/SupervisorDashboard'))
+const SupervisorReviews = safeLazy(() => import('./pages/SupervisorReviews'))
+const ReportLibrary = safeLazy(() => import('./pages/ReportLibrary'))
+const ReportAnalysis = safeLazy(() => import('./pages/ReportAnalysis'))
+const ProfessionalSupervisorDashboard = safeLazy(() => import('./pages/ProfessionalSupervisorDashboard'))
+const AdminDashboard = safeLazy(() => import('./pages/admin/AdminDashboard'))
+const AdminOverview = safeLazy(() => import('./pages/admin/AdminOverview'))
+const AdminUsers = safeLazy(() => import('./pages/admin/AdminUsers'))
+const AdminStudents = safeLazy(() => import('./pages/admin/AdminStudents'))
+const AdminSupervisors = safeLazy(() => import('./pages/admin/AdminSupervisors'))
+const AdminInternships = safeLazy(() => import('./pages/admin/AdminInternships'))
+const AdminTimeline = safeLazy(() => import('./pages/admin/AdminTimeline'))
+const AdminReports = safeLazy(() => import('./pages/admin/AdminReports'))
+const AdminAIAnalysis = safeLazy(() => import('./pages/admin/AdminAIAnalysis'))
+const AdminMeetings = safeLazy(() => import('./pages/admin/AdminMeetings'))
+const AdminDefenseAlerts = safeLazy(() => import('./pages/admin/AdminDefenseAlerts'))
+const AdminNotifications = safeLazy(() => import('./pages/admin/AdminNotifications'))
+const AdminSettings = safeLazy(() => import('./pages/admin/AdminSettings'))
+const MySupervisors = safeLazy(() => import('./pages/MySupervisors'))
+const Settings = safeLazy(() => import('./pages/Settings'))
+const ChangePassword = safeLazy(() => import('./pages/ChangePassword'))
+const ForgotPassword = safeLazy(() => import('./pages/ForgotPassword'))
+const Onboarding = safeLazy(() => import('./pages/Onboarding'))
+const WritingWorkspace = safeLazy(() => import('./pages/WritingWorkspace'))
+const PdfWorkspace = safeLazy(() => import('./pages/PdfWorkspace'))
 
 // Shown while a route's chunk is fetched. Deliberately neutral rather than a
 // skeleton: the alternative is a flash of a layout the incoming page may not use.

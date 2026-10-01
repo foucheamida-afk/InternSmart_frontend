@@ -144,6 +144,7 @@ const ReportAnalysis = () => {
   const [error, setError] = useState('')
 
   const roles = Array.isArray(user?.roles) && user.roles.length ? user.roles : [user?.role]
+  const isAcademicSupervisor = roles.includes('academic_supervisor')
   const dashboardHome = roles.includes('admin')
     ? '/admin'
     : roles.includes('professional_supervisor') && !roles.includes('academic_supervisor')
@@ -170,6 +171,7 @@ const ReportAnalysis = () => {
   }, [reportId, navigate])
 
   const handleRunAnalysis = async () => {
+    if (!isAcademicSupervisor) return
     setAnalyzing(true)
     setError('')
     try {
@@ -226,16 +228,18 @@ const ReportAnalysis = () => {
           </section>
 
           <div className="mb-6 flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={handleRunAnalysis}
-              disabled={analyzing}
-              className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold text-white transition cursor-pointer disabled:opacity-50"
-              style={{ background: 'linear-gradient(to right, #ff7a00, #ff9500)' }}
-            >
-              {analyzing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <FileSearch className="h-3.5 w-3.5" />}
-              {analyzing ? 'Analyzing...' : 'Run Plagiarism Analysis'}
-            </button>
+            {isAcademicSupervisor && (
+              <button
+                type="button"
+                onClick={handleRunAnalysis}
+                disabled={analyzing}
+                className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold text-white transition cursor-pointer disabled:opacity-50"
+                style={{ background: 'linear-gradient(to right, #ff7a00, #ff9500)' }}
+              >
+                {analyzing ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <FileSearch className="h-3.5 w-3.5" />}
+                {analyzing ? 'Analyzing...' : 'Run Plagiarism Analysis'}
+              </button>
+            )}
             <button
               type="button"
               onClick={load}
@@ -265,22 +269,28 @@ const ReportAnalysis = () => {
               style={{ borderColor: 'var(--line)', color: 'var(--text-muted)' }}
             >
               <FileSearch className="mb-3 h-10 w-10" style={{ color: 'var(--orange-3)' }} />
-              <p className="text-base font-medium" style={{ color: 'var(--text)' }}>No completed analysis yet</p>
-              <p className="mt-2 max-w-md text-sm">
-                {history.length
-                  ? 'Previous attempts are listed below. None has completed successfully.'
-                  : 'No similarity analysis has been run for this report yet.'}
+              <p className="text-base font-medium" style={{ color: 'var(--text)' }}>
+                {isAcademicSupervisor ? 'No completed analysis yet' : 'Plagiarism analysis pending'}
               </p>
-              <button
-                type="button"
-                onClick={handleRunAnalysis}
-                disabled={analyzing}
-                className="mt-4 inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-xs font-semibold text-white transition cursor-pointer disabled:opacity-50"
-                style={{ background: 'linear-gradient(to right, #ff7a00, #ff9500)' }}
-              >
-                {analyzing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FileSearch className="h-4 w-4" />}
-                {analyzing ? 'Running Plagiarism Analysis...' : 'Run Plagiarism Analysis'}
-              </button>
+              <p className="mt-2 max-w-md text-sm">
+                {isAcademicSupervisor
+                  ? history.length
+                    ? 'Previous attempts are listed below. None has completed successfully.'
+                    : 'No similarity analysis has been run for this report yet.'
+                  : 'The academic supervisor has not analyzed this report for plagiarism yet. Results will be visible here once analyzed.'}
+              </p>
+              {isAcademicSupervisor && (
+                <button
+                  type="button"
+                  onClick={handleRunAnalysis}
+                  disabled={analyzing}
+                  className="mt-4 inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-xs font-semibold text-white transition cursor-pointer disabled:opacity-50"
+                  style={{ background: 'linear-gradient(to right, #ff7a00, #ff9500)' }}
+                >
+                  {analyzing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <FileSearch className="h-4 w-4" />}
+                  {analyzing ? 'Running Plagiarism Analysis...' : 'Run Plagiarism Analysis'}
+                </button>
+              )}
             </div>
           ) : (
             <div className="space-y-5">
